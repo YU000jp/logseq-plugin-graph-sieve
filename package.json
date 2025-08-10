@@ -1,0 +1,56 @@
+{
+  "name": "logseq-cardbox",
+  "description": "Plugin to add thumbnail cards to Logseq that are displayed in order of update.",
+  "version": "0.2.0",
+  "type": "module",
+  "main": "dist/index.html",
+  "license": "MPL-2.0",
+  "repository": "sosuisen/logseq-cardbox",
+  "scripts": {
+    "dev": "vite",
+    "build:dev": "tsc && vite build --mode development",
+    "build": "tsc && vite build",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "release": "npm run build && rm -r release && mkdir release && cp -r dist images release && cp icon.png LICENSE package.json README.md release"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.11.3",
+    "@emotion/styled": "^11.11.0",
+    "@fontsource/noto-sans-jp": "^5.0.17",
+    "@fontsource/roboto": "^5.0.8",
+    "@logseq/libs": "^0.0.15",
+    "@mui/icons-material": "^5.15.2",
+    "@mui/material": "^5.15.2",
+    "date-fns": "^2.30.0",
+    "dexie": "^3.2.4",
+    "dexie-react-hooks": "^1.1.7",
+    "i18next": "^23.6.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-i18next": "^13.3.1",
+    "react-remove-scroll": "^2.5.7",
+    "tslog": "^4.9.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.9.0",
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@types/wicg-file-system-access": "^2023.10.3",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vitejs/plugin-react-swc": "^3.3.2",
+    "eslint": "^8.45.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.3",
+    "typescript": "^5.0.2",
+    "vite": "^4.4.5",
+    "vite-plugin-logseq": "^1.1.2"
+  },
+  "logseq": {
+    "id": "logseq-cardbox_3sulqr0v8",
+    "title": "Logseq CardBox",
+    "icon": "./icon.png"
+  },
+  "author": "Hidekazu Kubota"
+}

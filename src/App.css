@@ -1,0 +1,117 @@
+#app {
+  margin: 0 auto;
+  text-align: center;
+  width: 96%;
+  height: 92%;
+  margin-top: 2%;
+  margin-left: 2%;
+  position: absolute;
+  background-color: #dcdde0;
+  box-shadow: 5px 5px 0 0 #c0c0c0;
+  border-radius: 3px;
+  display: grid;
+  grid-template-rows: 60px auto 20px;
+}
+
+.control {
+  margin-top: 7px;
+  margin-bottom: 5px;
+  display: grid;
+  grid-template-columns: 1fr 60px;
+}
+
+.loading {
+  color: rgba(144, 0, 0, 0.7);
+  text-align: left;
+  margin-left: 24px;
+  margin-top: 7px;
+  float: left;
+  font-size: 24px;
+}
+
+.card-number {
+  color: rgba(0, 0, 0, 0.7);
+  text-align: left;
+  margin-left: 24px;
+  margin-top: 7px;
+  float: left;
+  font-size: 24px;
+}
+
+#tile {
+  padding-left: 24px;
+  padding-right: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  overflow-y: auto;
+}
+
+.box {
+  cursor: pointer;
+  border-radius: 0px 0px 3px 3px;
+  margin: 10px auto 10px 10px;
+  width: 140px;
+  height: 140px;
+  box-shadow: 2px 3px 0 0px #d0d0d0;
+  background-color: #ffffff;
+  border-top: 5px solid #90c0ff;
+  overflow-y: hidden;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.selectedBox {
+  background-color: #f0f0ff;
+}
+
+.box:hover {
+  background-color: #e0e0e0;
+}
+
+.box-title {
+  width: 100%;
+  font-weight: 700;
+  font-size: 14px;
+  overflow: hidden;
+  border-bottom: 1px solid #90c0ff;
+  flex-shrink: 0;
+}
+
+.box-summary {
+  font-size: 12px;
+  color: #606060;
+  overflow: hidden;
+  text-align: left;
+  padding: 7px;
+  white-space: pre-wrap;
+  flex-grow: 1;
+}
+
+.box-image {
+  overflow: hidden;
+  padding-top: 7px;
+  display: none;
+  flex-grow: 1;
+}
+
+.box-date {
+  font-size: 10px;
+}
+
+.footer {
+  color: rgba(0, 0, 0, 0.7);
+  font-size: 14px;
+  width: 100%;
+  background-color: #dcdde0;
+}
+
+.tag-label {
+  float: left;
+  margin-top: 7px;
+  margin-left: 24px;
+}
+
+.tag-input {
+  float: left;
+}
