@@ -151,7 +151,9 @@ function App() {
           [?t :block/name ?namePattern]
           [(clojure.string/include? ?namePattern "${tagQ}")]
           [?p :block/tags ?t]
-          [?p :block/original-name ?name]]
+          (or
+            [?p :block/original-name ?name]
+            [?p :block/title ?name])]
         `);
         tagPages = pageEntries.map(entry => entry[0]);
       }
