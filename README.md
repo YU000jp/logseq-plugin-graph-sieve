@@ -2,15 +2,11 @@
 
 A card-based navigator for [Logseq](https://github.com/logseq/logseq) that shows your pages as thumbnail cards, sorted by last update. Click a card to open a rich, multi-tab preview with copy/export tools, related/sub pages, and quick favorites/archives.
 
-![main](./images/screen-main.png)
-
 ## Launch
 Use any of the following:
 - Toolbar button labeled “CardBox”
 - Command palette: “Open CardBox”
 - Shortcut: Ctrl+Shift+Enter (Windows) / Cmd+Shift+Enter (macOS)
-
-![launch](./images/screen-launch.png)
 
 - Right after installation, the plugin builds its local database. While building, “Building...” appears in the top-left of the window. Don’t exit Logseq until it finishes.
 
