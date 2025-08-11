@@ -7,6 +7,7 @@ export interface Box {
   time: number; // Unix time
   summary: string[];
   image: string;
+  archived?: boolean; // viewed/archived toggle
 }
 
 export class CardBoxDexie extends Dexie {
@@ -15,7 +16,18 @@ export class CardBoxDexie extends Dexie {
   constructor(dbName: string) {
     super(dbName);
     this.version(1).stores({
-      box: '[graph+name], graph, time' // [graph+name] is the compound primary key, and time is an indexed property.
+      box: '[graph+name], graph, time'
+    });
+    this.version(2).stores({
+      // add 'archived' as an indexed property for quick filtering if needed
+      box: '[graph+name], graph, time, archived'
+    }).upgrade(tx => {
+      const table = tx.table<Box>('box');
+      return table.toCollection().modify((b) => {
+        if (typeof b.archived === 'undefined') {
+          (b as Box).archived = false;
+        }
+      });
     });
   }
 }

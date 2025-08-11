@@ -7,5 +7,26 @@
     "please-select-pages": "Select the folder named 'pages'",
     "filter-by-page-tag": "Filter by Page Tag",
         "filter-by-page-name": "Filter by Page Name",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "tab-content": "Content",
+    "tab-no-markdown": "No Markdown",
+    "tab-raw": "RAW",
+    "tab-info": "Info",
+    "toggle-hide-properties": "Hide properties",
+    "toggle-hide-refs": "Hide refs/embeds",
+    "always-hide-props": "Always hide properties",
+    "always-hide-props-ph": "e.g. author,source",
+    "open-in-logseq": "Open in Logseq",
+    "close": "Close",
+    "sidebar-placeholder": "Select a card to preview here",
+    "loading-content": "Loading...",
+    "no-content": "(No content)",
+    "copy-content": "Copy content",
+    "copied": "Copied",
+    "copy-failed": "Copy failed",
+    "file-modified": "File modified",
+    "backlinks": "Backlinks",
+    "related": "Related",
+    "close-all-tabs": "Close all tabs"
+        , "graph-label": "Graph"
 }

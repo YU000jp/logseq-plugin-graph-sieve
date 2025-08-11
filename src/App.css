@@ -1,23 +1,63 @@
 #app {
-  margin: 0 auto;
+  /* Fill viewport with 2% margin on each side to avoid clipping */
+  position: fixed;
+  top: 2%;
+  left: 2%;
+  right: 2%;
+  bottom: 2%;
+  width: auto;
+  height: auto;
+  box-sizing: border-box;
+  margin: 0;
   text-align: center;
-  width: 96%;
-  height: 92%;
-  margin-top: 2%;
-  margin-left: 2%;
-  position: absolute;
   background-color: #dcdde0;
   box-shadow: 5px 5px 0 0 #c0c0c0;
   border-radius: 3px;
   display: grid;
-  grid-template-rows: 60px auto 20px;
+  grid-template-rows: 60px auto 1fr 24px; /* header, global tabs, content, footer */
+  min-height: 0; /* allow children to shrink inside grid */
+}
+
+/* Global preview tabs row (full-width under header) */
+.global-tabs-row {
+  background: #fff;
+  border-bottom: 1px solid #eaeaea;
+  padding: 4px 8px 4px 8px;
+  overflow: hidden; /* prevent horizontal push when inner overflows */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tabs-actions {
+  flex: 0 0 auto;
+}
+.tabs-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .control {
   margin-top: 7px;
   margin-bottom: 5px;
   display: grid;
-  grid-template-columns: 1fr 60px;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  min-height: 0;
+}
+
+.graph-info {
+  text-align: right;
+  color: #555;
+  font-size: 12px;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+.control-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .loading {
@@ -38,12 +78,383 @@
   font-size: 24px;
 }
 
+/* Main content area with right sidebar */
+.content {
+  display: grid;
+  grid-template-columns: 3fr 2fr; /* left grid (cards) 3/5, right sidebar 2/5 */
+  gap: 8px;
+  min-height: 0; /* critical so inner columns can scroll within the grid area */
+}
+
 #tile {
   padding-left: 24px;
   padding-right: 24px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   overflow-y: auto;
+  min-height: 0; /* prevent pushing parent */
+}
+
+#sidebar {
+  background: #fff;
+  border-left: 1px solid #c7c7c7;
+  box-shadow: inset 2px 0 0 0 #e6e6e6;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* allow inner flex children to shrink */
+}
+
+.sidebar-inner {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0; /* critical for nested scroll */
+  overflow: hidden; /* avoid double scroll; body will scroll */
+}
+
+.preview-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0 0 8px;
+  width: auto;        /* use remaining space, right-anchored by spacer */
+  min-width: 0;
+  overflow-x: auto;         /* allow many tabs */
+  white-space: nowrap;      /* keep tabs on one line */
+  flex: 0 1 auto;           /* allow horizontal shrink */
+}
+.preview-tab.active button {
+  font-weight: 700;
+}
+
+.preview-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;           /* don't shrink; allow horizontal scroll */
+  max-width: 200px;         /* cap each tab width */
+}
+.preview-tab.closing {
+  background: rgba(255,0,0,0.06);
+  border-radius: 4px;
+}
+.preview-tab > .MuiIconButton-root {
+  margin-right: 2px; /* small spacing before the label */
+}
+.preview-tab .tab-close.MuiIconButton-root {
+  padding: 2px;            /* tighten clickable area */
+  line-height: 1;
+}
+.preview-tab .tab-close.MuiIconButton-root svg,
+.preview-tab .tab-close.MuiSvgIcon-root {
+  font-size: 14px;         /* smaller close icon */
+  width: 14px;
+  height: 14px;
+}
+
+/* Truncate long titles inside tab buttons */
+.preview-tab .MuiButton-root {
+  min-width: 0;
+  padding: 2px 8px;
+  max-width: 170px;         /* 200px - close button width */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;     /* keep original case */
+}
+
+.tab-title-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+/* Make scrollbar thin (optional, non-intrusive) */
+.preview-tabs::-webkit-scrollbar {
+  height: 6px;
+}
+.preview-tabs::-webkit-scrollbar-thumb {
+  background-color: rgba(0,0,0,0.2);
+  border-radius: 3px;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  flex: 0 0 auto;
+}
+.sidebar-inner.archived {
+  opacity: 0.6;
+}
+.sidebar-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-title {
+  font-weight: 700;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.breadcrumb {
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.breadcrumb .crumb {
+  color: #1a73e8;
+  text-decoration: none;
+  cursor: pointer;
+}
+.breadcrumb .crumb:hover {
+  text-decoration: underline;
+}
+.breadcrumb .sep {
+  color: #999;
+  margin: 0 2px;
+}
+
+.sidebar-nav {
+  display: grid;
+  grid-template-rows: auto auto auto auto; /* tabs, filters, options, actions */
+  padding: 4px 8px;
+  border-bottom: 1px solid #eee;
+  gap: 4px;
+  flex: 0 0 auto; /* keep nav at intrinsic height */
+  min-height: 0;
+}
+
+.sidebar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-row--tabs {
+  justify-content: flex-start;
+}
+
+.sidebar-row--filters {
+  justify-content: flex-start;
+}
+
+.sidebar-row--options {
+  justify-content: flex-start;
+}
+
+.sidebar-row--actions {
+  justify-content: flex-end;
+}
+
+.sidebar-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.prop-filter {
+  margin-left: 8px;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-body {
+  padding: 8px 12px 12px 12px;
+  overflow: auto; /* make content area scrollable */
+  user-select: text;
+  flex: 1 1 auto;
+  min-height: 0; /* prevent overflow pushing container */
+}
+
+.sidebar-subpages {
+  text-align: left;
+  margin-top: 16px;           /* add clear space from body content */
+  padding-top: 8px;           /* breathing room for the section */
+  border-top: 1px dashed #e5e5e5; /* subtle divider */
+}
+.sidebar-subpages .subpages-title {
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 8px;         /* a bit more space before cards */
+}
+.sidebar-subpages .subpages-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+/* Common grid for card-style lists inside sidebar (subpages, related, etc.) */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.sidebar-section {
+  border-top: 1px solid #eee;
+  padding: 4px 8px 8px 8px;
+  /* 高さを現在の約 2/3 に縮小: これまで 40% → 26% 程度に */
+  flex: 0 0 26%;
+  display: flex;
+  flex-direction: column;
+  min-height: 80px;
+  max-height: 32%;
+  font-size: 12px; /* セクション全体の文字を小さく */
+}
+.section-tabs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: flex-start;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed #e5e5e5;
+}
+.section-body {
+  overflow: auto;
+  padding-top: 6px;
+  min-height: 0;
+}
+.section-body.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.section-col .section-title {
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.sidebar-placeholder,
+.sidebar-empty,
+.sidebar-loading {
+  color: #666;
+  font-size: 12px;
+  padding: 12px;
+  text-align: left;
+}
+
+.ls-block-list {
+  list-style: disc;
+  padding-left: 18px;
+  margin: 0;
+}
+
+.ls-block-item {
+  margin: 2px 0;
+}
+
+.ls-block-item.no-content {
+  list-style: none;
+}
+
+.ls-block-content {
+  font-size: 13px;  
+  text-align: left;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.ls-block-content .ls-page-ref {
+  color: #1a73e8;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ls-block-content .ls-page-ref:hover {
+  text-decoration: underline;
+}
+
+.ls-asset-link.pdf {
+  color: #1a73e8;
+  text-decoration: none;
+}
+.ls-asset-link.pdf:hover {
+  text-decoration: underline;
+}
+.ls-ext-link {
+  color: #1a73e8;
+  text-decoration: none;
+}
+.ls-ext-link:hover { text-decoration: underline; }
+.ls-page-ref {
+  color: #1a73e8;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ls-page-ref:hover {
+  text-decoration: underline;
+}
+
+.ls-block-line.prop {
+  opacity: 0.45;
+}
+
+.ls-block-line.ref {
+  opacity: 0.55;
+}
+.sidebar-section .ls-block-list {
+  list-style: disc;
+  padding-left: 18px;
+  margin: 0;
+}
+.sidebar-section .ls-block-item {
+  margin: 2px 0;
+}
+.sidebar-section .ls-block-item a.ls-page-ref {
+  display: inline-block;
+}
+.ls-block-line.ref .ref-text {
+  opacity: 0.9;
+}
+
+.ls-plain-text {
+  white-space: pre-wrap;
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  user-select: text;
+}
+
+.ls-block-line.image .ls-img-link {
+  display: inline-block;
+  position: relative;
+  overflow: visible;
+}
+.ls-block-line.image .ls-img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 150px;
+  max-height: 150px;
+  object-fit: contain;
+  margin: 4px 0;
+  transition: transform 0.12s ease-in-out;
+}
+.ls-block-line.image .ls-img-link:hover .ls-img {
+  transform: scale(2.0); /* 150 -> 300 近辺 */
+  z-index: 5;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
 }
 
 .box {
@@ -59,6 +470,11 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+}
+
+.box.archived {
+  opacity: 0.45;
+  filter: grayscale(0.2);
 }
 
 .selectedBox {
@@ -103,7 +519,10 @@
   color: rgba(0, 0, 0, 0.7);
   font-size: 14px;
   width: 100%;
+  line-height: 24px;
+  height: 24px;
   background-color: #dcdde0;
+  overflow: hidden;
 }
 
 .tag-label {

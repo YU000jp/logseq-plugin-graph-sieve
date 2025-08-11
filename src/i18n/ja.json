@@ -7,5 +7,26 @@
     "please-select-pages": "pagesという名前のフォルダを選択してください。",
     "filter-by-page-tag": "ページタグで絞り込み",
         "filter-by-page-name": "ページ名で絞り込み",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "tab-content": "内容",
+    "tab-no-markdown": "マークダウンなし",
+    "tab-raw": "RAW",
+    "tab-info": "情報",
+    "toggle-hide-properties": "プロパティ非表示",
+    "toggle-hide-refs": "参照/埋め込みを非表示",
+    "always-hide-props": "常に除外するプロパティ",
+    "always-hide-props-ph": "例: author,source",
+    "open-in-logseq": "Logseqで開く",
+    "close": "閉じる",
+    "sidebar-placeholder": "カードを選択するとここに内容を表示します",
+    "loading-content": "読み込み中...",
+    "no-content": "(内容がありません)",
+    "copy-content": "本文をコピー",
+    "copied": "コピーしました",
+    "copy-failed": "コピーに失敗しました",
+    "file-modified": "ファイル更新日時",
+    "backlinks": "バックリンク",
+    "related": "関連",
+    "close-all-tabs": "すべてのタブを閉じる"
+        , "graph-label": "グラフ"
 }

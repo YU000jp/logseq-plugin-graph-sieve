@@ -8,6 +8,7 @@ interface Props {
   currentGraph: string;
   preferredDateFormat: string;
   onClick: (box: Box, e: React.MouseEvent<HTMLDivElement>) => void;
+  displayName?: string; // optional: override title shown on the card
 }
 
 const getTimeString = (unixTime: number) => {
@@ -15,11 +16,11 @@ const getTimeString = (unixTime: number) => {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
 };
 
-export const BoxCard: React.FC<Props> = ({ box, selected, currentGraph, preferredDateFormat, onClick }) => {
+export const BoxCard: React.FC<Props> = ({ box, selected, currentGraph, preferredDateFormat, onClick, displayName }) => {
   return (
-    <div className={'box' + (selected ? ' selectedBox' : '')} onClick={e => onClick(box, e)} id={box.uuid}>
+    <div className={'box' + (selected ? ' selectedBox' : '') + (box.archived ? ' archived' : '')} onClick={e => onClick(box, e)} id={box.uuid}>
       <div className='box-title'>
-        {box.name}
+  {displayName ?? box.name}
       </div>
       <div className='box-summary' style={{ display: box.image === '' ? 'block' : 'none' }}>
         {box.summary.map((item, i) => (<React.Fragment key={i}>{item}<br /></React.Fragment>))}

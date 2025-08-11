@@ -39,35 +39,19 @@ function main() {
     zIndex: 20,
   })
 
-  // logseq.App.registerUIItem('pagebar', {
-  //   key: 'cardbox',
-  //   template: `
-  //   <a data-on-click="openCardBox" title="open cardbox">
-  //     <span class="material-symbols-outlined">
-  //     grid_view
-  //     </span>
-  //   </a> 
-  //   `,
-  // });
-
-  const cardboxDiv = document.createElement('div');
-  cardboxDiv.innerHTML = `
-      <a class="item group flex items-center text-sm font-medium rounded-md">
-          <span class="ui__icon ti ls-icon-calendar">
-            <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-calendar" height="24" viewBox="0 -960 960 960" width="24"><path d="M120-520v-320h320v320H120Zm0 400v-320h320v320H120Zm400-400v-320h320v320H520Zm0 400v-320h320v320H520ZM200-600h160v-160H200v160Zm400 0h160v-160H600v160Zm0 400h160v-160H600v160Zm-400 0h160v-160H200v160Zm400-400Zm0 240Zm-240 0Zm0-240Z"/></svg>
-          </span>
-          <span class="flex-1">CardBox</span>
+  // Register toolbar button (remove side menu entry)
+  logseq.App.registerUIItem('toolbar', {
+    key: 'cardbox-open',
+    template: `
+      <a class="button" data-on-click="openCardBox" title="CardBox">
+        <span class="ui__icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+            <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/>
+          </svg>
+        </span>
       </a>
-  `;
-  cardboxDiv.className = `cardbox-nav`;
-  cardboxDiv.addEventListener('click', openCardBox);
-
-  const navHeader = window.parent.document.querySelector('.nav-header');
-  const cardboxNav = navHeader!.querySelector(`.cardbox-nav`);
-  if (cardboxNav) {
-    navHeader!.removeChild(cardboxNav);
-  }
-  navHeader!.insertBefore(cardboxDiv, navHeader!.lastChild);
+    `,
+  });
 
   document.body.addEventListener('click', (e) => {
     if ((e.target as HTMLElement).classList.length === 0) {
@@ -91,4 +75,7 @@ function main() {
 // bootstrap
 logseq.ready({
   openCardBox
-}, main).catch(console.error)
+}, main).then(() => {
+  // bind model for toolbar button click
+  logseq.provideModel({ openCardBox });
+}).catch(console.error)

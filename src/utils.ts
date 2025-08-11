@@ -80,6 +80,14 @@ export const getSummary = (blocks: BlockEntity[]): [string[], string] => {
   let image = '';
   type ParentBlocks = { blocks: BlockEntity[]; index: number };
   const parentStack: ParentBlocks[] = [];
+  const isIdPropLine = (line: string): boolean => {
+    const l = line.replace(/\r/g, '');
+    return /^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*id\s*::\s*/i.test(l);
+  };
+  const isCollapsedPropLine = (line: string): boolean => {
+    const l = line.replace(/\r/g, '');
+    return /^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*collapsed\s*::\s*/i.test(l);
+  };
 
   if (blocks && blocks.length > 0) {
     parentStack.push({ blocks: blocks as BlockEntity[], index: 0 });
@@ -96,13 +104,19 @@ export const getSummary = (blocks: BlockEntity[]): [string[], string] => {
       const block = currentParent.blocks[currentParent.index++];
 
       if (Object.prototype.hasOwnProperty.call(block, 'id')) {
-        let content = (block as BlockEntity).content.substring(0, max);
-        if (!content.match(/^\w+?:: ./) && !content.match(/^---\n/)) {
-          if (parentStack.length > 1) {
-            content = '  '.repeat(parentStack.length - 1) + '* ' + content;
+        // Use the first line for summary and remove id:: property lines (including bullet/checkbox prefixed)
+        const raw = (block as BlockEntity).content || '';
+        let firstLine = raw.split('\n')[0] || '';
+  if (!isIdPropLine(firstLine) && !isCollapsedPropLine(firstLine)) {
+          // Keep old behavior: skip generic property-looking or front-matter separator lines
+          if (!/^\w+?::\s+/.test(firstLine) && !/^---$/.test(firstLine)) {
+            if (parentStack.length > 1) {
+              firstLine = '  '.repeat(parentStack.length - 1) + '* ' + firstLine;
+            }
+            const capped = firstLine.substring(0, max);
+            total += capped.length;
+            summary.push(capped);
           }
-          total += content.length;
-          summary.push(content);
         }
         if ((block as BlockEntity).children && (block as BlockEntity).children!.length > 0) {
           parentStack.push({
@@ -169,7 +183,7 @@ export const parseOperation = (changes: FileChanges): [Operation, string] => {
   }
 
   for (const data of changes.txData) {
-    if (data.length === 5 && data[1] === 'block/original-name') {
+    if (data.length === 5 && (data[1] === 'block/original-name' || data[1] === 'block/title')) {
       originalName = data[2] as unknown as string;
       let createOrDelete: Operation = 'create';
       if (data[4] === false) {
