@@ -1,10 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
-import "@fontsource/roboto"
-import "@fontsource/roboto/700.css"
-import '@fontsource/noto-sans-jp'
-import '@fontsource/noto-sans-jp/700.css'
 import './main.css'
 import '@logseq/libs'
 import './i18n/configs';
@@ -37,10 +33,6 @@ function main() {
     label: 'Open CardBox',
   };
   logseq.App.registerCommandPalette(command, openCardBox);
-
-  logseq.provideStyle(`
-    @import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0");
-  `)
 
   logseq.setMainUIInlineStyle({
     position: 'fixed',

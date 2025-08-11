@@ -15,8 +15,6 @@
     "release": "npm run build && rm -r release && mkdir release && cp -r dist images release && cp icon.png LICENSE package.json README.md release"
   },
   "dependencies": {
-    "@fontsource/noto-sans-jp": "^5.0.17",
-    "@fontsource/roboto": "^5.0.8",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@logseq/libs": "^0.0.15",
