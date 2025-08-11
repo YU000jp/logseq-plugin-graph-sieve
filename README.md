@@ -78,3 +78,8 @@ Restart Logseq after changing language to apply it.
 If you like it, please consider supporting development.
 
 [![donate](https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png)](https://www.buymeacoffee.com/hidekaz)
+
+## Credits
+
+- This plugin is based on the CardBox plugin created by Hidekazu Kubota (sosuisen): https://github.com/sosuisen/logseq-cardbox (author profile: https://github.com/sosuisen)
+- The Buy Me a Coffee button above links to Mr. Kubota’s page to support his work.
