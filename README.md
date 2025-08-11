@@ -1,66 +1,80 @@
-# Logseq CardBox Plugin [<img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30"/>](https://www.buymeacoffee.com/hidekaz)
+# Logseq Graph Sieve Plugin [<img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30"/>](https://www.buymeacoffee.com/hidekaz)
 
-English / [日本語](https://scrapbox.io/logseq-ja/Logseq_Cardbox_Plugin%2F%E4%BD%BF%E3%81%84%E6%96%B9)
-
-Plugin to add thumbnail cards to [Logseq](https://github.com/logseq/logseq) that are displayed in order of update.
+A card-based navigator for [Logseq](https://github.com/logseq/logseq) that shows your pages as thumbnail cards, sorted by last update. Click a card to open a rich, multi-tab preview with copy/export tools, related/sub pages, and quick favorites/archives.
 
 ![main](./images/screen-main.png)
 
-## How to launch
-Any of the following:
-- "CardBox" button on the left sidebar
-- Click the CardBox icon in the top right corner of the page
-- Enter "Open CardBox" in the command palette
-- Shortcut:
-  - (Windows) Ctrl + Shift + Enter
-  - (macOS) Cmd + Shift + Enter
- 
+## Launch
+Use any of the following:
+- Toolbar button labeled “CardBox”
+- Command palette: “Open CardBox”
+- Shortcut: Ctrl+Shift+Enter (Windows) / Cmd+Shift+Enter (macOS)
+
 ![launch](./images/screen-launch.png)
-	
-- Immediately after installation, CardBox will automatically build the database. During this time, the message "Building..." will appear in the upper left corner of the CardBox. Do not exit Logseq until this message disappears.
 
-## Selecting a card
-- The thumbnail cards of the pages are ordered by the date of the last update, starting from the top left.
-  - Only pages are displayed. The journal and whiteboard are not displayed.
-- Click on a page or use the cursor keys to move the selection and press Enter to open it.
-  - If you hold down Shift while performing the open operation, the page will open in the sidebar.
+- Right after installation, the plugin builds its local database. While building, “Building...” appears in the top-left of the window. Don’t exit Logseq until it finishes.
 
-## Filtering using page tags
-- Type a character key to filter cards by a page tag
-- What is a page tag? See below:
+## Cards and navigation
+- Cards are ordered by last updated time (top-left is newest). Only Logseq pages are shown; journals and whiteboards are not displayed. Empty pages are hidden.
+- Click a card to open it in the plugin’s preview sidebar. Shift+Click opens it directly in Logseq.
+- Keyboard:
+  - Arrow keys: Move selection
+  - Enter: Open selected card in the plugin preview
+  - Shift+Enter: Open selected card in Logseq
+  - Esc: Close the plugin window
+
+## Filtering
+- Two quick filters in the top bar:
+  - Filter by Page Tag: type to narrow by “page tags”
+  - Filter by Page Name: partial match on page titles
+- Typing when no input is focused will jump to the tag filter automatically.
+
+What is a page tag? See below:
 
 ![page tag](./images/pagetag.png)
 
-## Closing the CardBox
-- Close CardBox by pressing the X button in the top right-hand corner or pressing the Esc key.
+## Preview sidebar
+Open a card to see a multi-tab preview with tools:
 
-## Key bindings
-- Any character keys: Input a page tag
-- Up, Down, Left, Right: Move the cursor to select a card
-- Enter: Open the selected card
-- Shift+Enter: Open the selected card in the sidebar
-- Esc: Close the CardBox
+- Tabs
+  - Content: render page blocks (toggle “Hide properties” and “Hide refs/embeds”)
+  - No Markdown: plain text with formatting removed
+  - RAW: outline of first lines for a compact overview
+- Controls
+  - Copy content: copies the current tab’s text view to the clipboard
+  - Open in Logseq: jumps to the page in Logseq
+  - Close / Close all tabs
+- Options
+  - Always hide properties: a comma-separated list of property keys to always hide (e.g., author, source). “id” and “collapsed” are always hidden.
+- Navigation helpers
+  - Breadcrumbs for hierarchical page names (click to open that part)
+  - Sub pages section (direct children like Parent/Child)
+  - Related section (name-token similarity, excluding links already shown in Content)
+- Favorites and archive
+  - Star to favorite a page (plugin-local). Favorites also appear in a list at the bottom of the left pane.
+  - Archive to dim a page in views (doesn’t delete it).
 
-## Languages supported 
+## Closing
+- Click the close icon in the top-right, press Esc, or click outside the window to close.
+
+## Rebuild and timestamps
+- For accurate “last updated” sorting, click Rebuild and select your graph’s pages folder (Graph/pages). When the pages folder is selected, file timestamps are used; otherwise Logseq’s page timestamps are used.
+- After re-indexing in Logseq or editing files outside Logseq, press Rebuild to refresh order and content if needed.
+
+## Languages
 - English
 - Japanese
 
-You need to restart Logseq for the language change to take effect.
+Restart Logseq after changing language to apply it.
 
 ## Limitations
-- CardBox will not display pages without body text.
-	- Logseq does not create a .md file for a page with only a title without body text. This plug-in reads the modification time of the .md file directly, so it cannot display pages with no file.
-- Since Logseq is currently in beta, it cannot correctly manage the modification time of pages. If the modification time is incorrect, please press the "Rebuild" button (it will get the modification time directly from the specified pages folder).
+- Empty pages aren’t shown.
+- Pages whose title ends with a slash (e.g., `MyPage/`) can’t be handled correctly.
+- If Logseq cannot manage page modification time correctly, use Rebuild and select the pages folder to force reading file timestamps.
   - See https://github.com/logseq/logseq/issues/8556
-- Changes made directly to the .md file while Logseq is not running will not be reflected in the CardBox.
-	- To reflect them, press the 'Rebuild' button.
-- After executing the "Re-index" in Logseq, press the "Rebuild" button in the CardBox.
-  - If you do not rebuild, pages may not be displayed in the correct time order.
-  - If you do not rebuild, you cannot open the page in the sidebar from CardBox.
-- Pages with a slash at the end of the title (e.g. MyPage/ ) will not display correctly.
 
-# Support
+## Support
 
-If you like it, please donate to me to continue the development.
+If you like it, please consider supporting development.
 
 [![donate](https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png)](https://www.buymeacoffee.com/hidekaz)
