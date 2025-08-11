@@ -12,7 +12,11 @@
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "release": "npm run build && rm -r release && mkdir release && cp -r dist images release && cp icon.png LICENSE package.json README.md release"
+    "release": "npm run build && rm -r release && mkdir release && cp -r dist images release && cp icon.png LICENSE package.json README.md release",
+    "check:deps": "depcheck --specials=bin,eslint,tsconfig,typescript,postcss,rollup,webpack",
+    "check:tree": "npm ls --all --depth=0",
+    "prune": "npm prune",
+    "dedupe": "npm dedupe"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -38,6 +42,7 @@
     "@typescript-eslint/eslint-plugin": "^6.21.0",
     "@typescript-eslint/parser": "^6.21.0",
     "@vitejs/plugin-react-swc": "^3.11.0",
+    "depcheck": "^1.4.7",
     "eslint": "^8.57.1",
     "eslint-plugin-react-hooks": "^4.6.2",
     "eslint-plugin-react-refresh": "^0.4.20",
