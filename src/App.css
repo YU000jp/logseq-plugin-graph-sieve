@@ -86,6 +86,12 @@
   min-height: 0; /* critical so inner columns can scroll within the grid area */
 }
 
+.left-pane {
+  display: grid;
+  grid-template-rows: 1fr auto; /* tile, favorites */
+  min-height: 0;
+}
+
 #tile {
   padding-left: 24px;
   padding-right: 24px;
@@ -94,6 +100,26 @@
   overflow-y: auto;
   min-height: 0; /* prevent pushing parent */
 }
+
+.left-favorites {
+  background: #fff;
+  border-top: 1px solid #c7c7c7;
+  padding: 8px 16px 12px 16px;
+  overflow: auto;
+  max-height: 38vh;
+}
+.left-favorites .favorites-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.left-favorites .favorites-title {
+  font-weight: 600;
+  font-size: 12px;
+  margin: 0;
+}
+.left-favorites .favorites-actions { display: flex; align-items: center; gap: 4px; }
 
 #sidebar {
   background: #fff;
@@ -344,6 +370,10 @@
   font-weight: 600;
   font-size: 12px;
   margin-bottom: 4px;
+}
+.section-col.favorites .section-title::before {
+  content: "★ ";
+  color: #f5b301;
 }
 
 .sidebar-placeholder,

@@ -27,6 +27,10 @@
     "file-modified": "ファイル更新日時",
     "backlinks": "バックリンク",
     "related": "関連",
+    "favorites": "お気に入り",
+    
+    "favorite": "お気に入り",
+    "unfavorite": "お気に入り解除",
     "close-all-tabs": "すべてのタブを閉じる"
         , "graph-label": "グラフ"
 }

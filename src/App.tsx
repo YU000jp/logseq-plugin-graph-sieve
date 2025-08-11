@@ -11,6 +11,8 @@ import { Clear, ContentCopy } from '@mui/icons-material';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
+import StarIcon from '@mui/icons-material/Star';
 import { encodeLogseqFileName, getLastUpdatedTime, getSummary, parseOperation, sleep } from './utils';
 import type { MarkdownOrOrg, PrimaryKey, SearchResultPage, FileChanges } from './types';
 import BoxCard from './components/BoxCard';
@@ -637,6 +639,10 @@ function App() {
   const [related, setRelated] = useState<Box[]>([]);
   // Sub pages for fallback when CONTENT has no visible lines
   const [subpages, setSubpages] = useState<Box[]>([]);
+  // Favorites for sidebarBox
+  const [favorites, setFavorites] = useState<Box[]>([]);
+  // Favorites list at bottom of left cards pane
+  const [leftFavorites, setLeftFavorites] = useState<Box[]>([]);
 
   useEffect(() => {
     const loadRelated = async () => {
@@ -703,6 +709,43 @@ function App() {
     loadSub();
   }, [sidebarBox?.name, currentGraph]);
 
+  // Load favorites list (for current page scope: children favorites first, then recent other favorites)
+  useEffect(() => {
+    const loadFav = async () => {
+      const name = sidebarBox?.name;
+      if (!currentGraph) { setFavorites([]); return; }
+      try {
+        const allFav = await db.box
+          .where('graph').equals(currentGraph)
+          .and(b => !!b.favorite)
+          .reverse()
+          .sortBy('time');
+        if (!name) { setFavorites(allFav.slice(0, 50)); return; }
+        const prefix = name + '/';
+        const children = allFav.filter(b => b.name.startsWith(prefix));
+        const others = allFav.filter(b => !b.name.startsWith(prefix));
+        setFavorites([ ...children, ...others ].slice(0, 50));
+      } catch { setFavorites([]); }
+    };
+    loadFav();
+  }, [sidebarBox?.name, currentGraph]);
+
+  // Load global favorites for left pane
+  useEffect(() => {
+    const loadLeftFav = async () => {
+      if (!currentGraph) { setLeftFavorites([]); return; }
+      try {
+        const favs = await db.box
+          .where('graph').equals(currentGraph)
+          .and(b => !!b.favorite)
+          .reverse()
+          .sortBy('time');
+        setLeftFavorites(favs.slice(0, 100));
+      } catch { setLeftFavorites([]); }
+    };
+    loadLeftFav();
+  }, [currentGraph, favorites.length, totalCardNumber]);
+
   // (Backlinks removed)
 
   const openDirectoryPicker = useCallback(async () => {
@@ -745,6 +788,24 @@ function App() {
       console.error('Failed to update archived flag', e);
     }
   }, []);
+
+  const toggleFavorite = useCallback(async (box: Box, next: boolean) => {
+    try {
+      await db.box.update([box.graph, box.name], { favorite: next });
+      // reflect in previews state immediately
+      setPreviews(prev => prev.map(p => (
+        p.box.graph === box.graph && p.box.name === box.name
+          ? { ...p, box: { ...p.box, favorite: next } }
+          : p
+      )));
+      // refresh favorites list
+  const favs = await db.box.where('graph').equals(currentGraph).and(b => !!b.favorite).reverse().sortBy('time');
+  setFavorites(favs.slice(0, 50));
+  setLeftFavorites(favs.slice(0, 100));
+    } catch (e) {
+      console.error('Failed to update favorite flag', e);
+    }
+  }, [currentGraph]);
 
   const boxElements = cardboxes?.map((box: Box, index) => (
     <BoxCard
@@ -901,8 +962,31 @@ function App() {
         </div>
       )}
       <div className='content'>
-        <div id='tile' ref={tileRef} tabIndex={2}>
-          {boxElements}
+        <div className='left-pane'>
+          <div id='tile' ref={tileRef} tabIndex={2}>
+            {boxElements}
+          </div>
+          <div className='left-favorites'>
+            <div className='favorites-header'>
+              <div className='favorites-title'>{t('favorites') || 'Favorites'}</div>
+            </div>
+            {leftFavorites.length === 0 ? (
+              <div className='sidebar-empty'>{t('no-content')}</div>
+            ) : (
+              <div className='cards-grid'>
+                {leftFavorites.map((b) => (
+                  <BoxCard
+                    key={`left-fav-${b.graph}-${b.name}`}
+                    box={b}
+                    selected={false}
+                    currentGraph={currentGraph}
+                    preferredDateFormat={preferredDateFormat}
+                    onClick={boxOnClick}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <aside id='sidebar'>
           {sidebarBox ? (
@@ -950,6 +1034,11 @@ function App() {
                   })()}
                 </div>
                 <div className='sidebar-controls'>
+                  <Tooltip title={sidebarBox.favorite ? (t('unfavorite') || 'Unfavorite') : (t('favorite') || 'Favorite')}>
+                    <IconButton size='small' onClick={() => toggleFavorite(sidebarBox, !sidebarBox.favorite)} aria-label='favorite-toggle'>
+                      {sidebarBox.favorite ? <StarIcon fontSize='small' style={{ color: '#f5b301' }} /> : <StarBorderIcon fontSize='small' />}
+                    </IconButton>
+                  </Tooltip>
                   <Tooltip title={sidebarBox.archived ? 'Unarchive' : 'Archive'}>
                     <IconButton size='small' onClick={() => toggleArchive(sidebarBox, !sidebarBox.archived)} aria-label='archive-toggle'>
                       {sidebarBox.archived ? <Inventory2Icon fontSize='small' /> : <Inventory2OutlinedIcon fontSize='small' />}

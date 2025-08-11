@@ -1,5 +1,6 @@
 import { format } from 'date-fns';
 import React from 'react';
+import StarIcon from '@mui/icons-material/Star';
 import type { Box } from '../db';
 
 interface Props {
@@ -21,6 +22,7 @@ export const BoxCard: React.FC<Props> = ({ box, selected, currentGraph, preferre
     <div className={'box' + (selected ? ' selectedBox' : '') + (box.archived ? ' archived' : '')} onClick={e => onClick(box, e)} id={box.uuid}>
       <div className='box-title'>
   {displayName ?? box.name}
+  {box.favorite ? <StarIcon fontSize='inherit' style={{ color: '#f5b301', float: 'right', marginRight: 4 }} /> : null}
       </div>
       <div className='box-summary' style={{ display: box.image === '' ? 'block' : 'none' }}>
         {box.summary.map((item, i) => (<React.Fragment key={i}>{item}<br /></React.Fragment>))}

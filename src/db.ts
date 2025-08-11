@@ -8,6 +8,7 @@ export interface Box {
   summary: string[];
   image: string;
   archived?: boolean; // viewed/archived toggle
+  favorite?: boolean; // plugin-local favorites toggle
 }
 
 export class CardBoxDexie extends Dexie {
@@ -26,6 +27,17 @@ export class CardBoxDexie extends Dexie {
       return table.toCollection().modify((b) => {
         if (typeof b.archived === 'undefined') {
           (b as Box).archived = false;
+        }
+      });
+    });
+    this.version(3).stores({
+      // add 'favorite' flag (non-indexed) and keep indices; Dexie requires re-declare full schema
+      box: '[graph+name], graph, time, archived, favorite'
+    }).upgrade(tx => {
+      const table = tx.table<Box>('box');
+      return table.toCollection().modify((b) => {
+        if (typeof b.favorite === 'undefined') {
+          (b as Box).favorite = false;
         }
       });
     });
