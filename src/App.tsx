@@ -1,7 +1,6 @@
 import { logger } from './logger'; // logger.tsからロガーをインポート
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { format } from 'date-fns';
-import { BlockEntity, BlockUUIDTuple, IDatom } from '@logseq/libs/dist/LSPlugin.user';
+// import { BlockEntity } from '@logseq/libs/dist/LSPlugin.user';
 import { useTranslation } from "react-i18next";
 import i18n from "i18next";
 import { db, Box } from './db';
@@ -9,232 +8,9 @@ import './App.css'
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Button, IconButton, InputAdornment, TextField, Dialog, DialogActions, DialogContent, DialogTitle } from '@mui/material';
 import { Clear } from '@mui/icons-material';
-
-type Operation = 'create' | 'modified' | 'delete' | '';
-
-type MarkdownOrOrg = 'markdown' | 'org';
-
-type ParentBlocks =
-  {
-    blocks: (BlockEntity | BlockUUIDTuple)[];
-    index: number;
-  };
-
-type SearchResultPage = string[];
-
-type PrimaryKey = [string, string];
-
-type FileChanges = {
-  blocks: BlockEntity[];
-  txData: IDatom[];
-  txMeta?: {
-    outlinerOp: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    [key: string]: any;
-  };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-const encodeLogseqFileName = (name: string) => {
-  // Encode characters that are not allowed in file name.
-  if (!name) return '';
-  return name
-    .replace(/\/$/, '') // Remove trailing slash
-    .replace(/^(CON|PRN|AUX|NUL|COM1|COM2|COM3|COM4|COM5|COM6|COM7|COM8|COM9|LPT1|LPT2|LPT3|LPT4|LPT5|LPT6|LPT7|LPT8|LPT9)$/, '$1___')
-    .replace(/\.$/, '.___')
-    .replace(/_\/_/g, '%5F___%5F')
-    .replace(/</g, '%3C')
-    .replace(/>/g, '%3E')
-    .replace(/:/g, '%3A')
-    .replace(/"/g, '%22')
-    .replace(/\//g, '___')
-    .replace(/\\/g, '%5C')
-    .replace(/\|/g, '%7C')
-    .replace(/\?/g, '%3F')
-    .replace(/\*/g, '%2A')
-    .replace(/#/g, '%23')
-    .replace(/^\./, '%2E');
-};
-
-const decodeLogseqFileName = (name: string) => {
-  if (!name) return '';
-
-  // Cannot restore trailing slash because it is not saved in local file.
-  return name
-    .replace(/^(CON|PRN|AUX|NUL|COM1|COM2|COM3|COM4|COM5|COM6|COM7|COM8|COM9|LPT1|LPT2|LPT3|LPT4|LPT5|LPT6|LPT7|LPT8|LPT9)___$/, '$1')
-    .replace(/\.___$/, '.')
-    .replace(/%5F___%5F/g, '_/_')
-    .replace(/%3C/g, '<')
-    .replace(/%3E/g, '>')
-    .replace(/%3A/g, ':')
-    .replace(/%22/g, '"')
-    .replace(/___/g, '/')
-    .replace(/%5C/g, '\\')
-    .replace(/%7C/g, '|')
-    .replace(/%3F/g, '?')
-    .replace(/%2A/g, '*')
-    .replace(/%23/g, '#')
-    .replace(/%2E/g, '.');
-};
-
-const getLastUpdatedTime = async (fileName: string, handle: FileSystemDirectoryHandle, preferredFormat: MarkdownOrOrg): Promise<number> => {
-  // Cannot get from subdirectory.
-  // const path = `pages/${fileName}.md`;
-  let path = fileName + (preferredFormat === 'markdown' ? '.md' : '.org');
-
-  let fileHandle = await handle.getFileHandle(path).catch(() => {
-    // Logseq does not save an empty page as a local file.
-    logger.debug(`Failed to get file handle: ${path}`);
-    return null;
-  });
-  if (!fileHandle) {
-    path = fileName + (preferredFormat === 'markdown' ? '.org' : '.md');
-    logger.debug(`Retry: ${path}`);
-    fileHandle = await handle.getFileHandle(path).catch(() => {
-      // Logseq does not save an empty page as a local file.
-      logger.debug(`Failed to get file handle: ${path}`);
-      return null;
-    });
-  }
-
-  if (!fileHandle) return 0;
-
-  const file = await fileHandle.getFile();
-  const date = new Date(file.lastModified);
-
-  return date.getTime();
-};
-
-const getSummary = (blocks: BlockEntity[]): [string[], string] => {
-  const max = 100;
-  let total = 0;
-  const summary = [];
-  let image = '';
-  const parentStack: ParentBlocks[] = [];
-
-  if (blocks && blocks.length > 0) {
-    parentStack.push({
-      blocks,
-      index: 0,
-    });
-
-    while (total < max) {
-      let currentParent: ParentBlocks = parentStack[parentStack.length - 1];
-      while (currentParent.index >= currentParent.blocks.length) {
-        parentStack.pop();
-        if (parentStack.length === 0) break;
-        currentParent = parentStack[parentStack.length - 1];
-      }
-      if (parentStack.length === 0) break;
-
-      const block = currentParent.blocks[currentParent.index++];
-
-      if (Object.prototype.hasOwnProperty.call(block, 'id')) {
-        let content = (block as BlockEntity).content.substring(0, max);
-        // skip property
-        if (!content.match(/^\w+?:: ./) && !content.match(/^---\n/)) {
-          if (parentStack.length > 1) {
-            content = '  '.repeat(parentStack.length - 1) + '* ' + content;
-          }
-          total += content.length;
-          summary.push(content);
-        }
-        if ((block as BlockEntity).children && (block as BlockEntity).children!.length > 0) {
-          parentStack.push({
-            blocks: (block as BlockEntity).children!,
-            index: 0,
-          });
-        }
-      }
-    }
-
-    // Search embedded image
-    parentStack.splice(0, parentStack.length);
-    parentStack.push({
-      blocks,
-      index: 0,
-    });
-
-    while (parentStack.length > 0) {
-      let currentParent: ParentBlocks = parentStack[parentStack.length - 1];
-      while (currentParent.index >= currentParent.blocks.length) {
-        parentStack.pop();
-        if (parentStack.length === 0) break;
-        currentParent = parentStack[parentStack.length - 1];
-      }
-      if (parentStack.length === 0) break;
-
-      const block = currentParent.blocks[currentParent.index++];
-
-      if (Object.prototype.hasOwnProperty.call(block, 'id')) {
-        // Markdown ![xxx](../assets/xxx.png)
-        // Org mode [[../assets/xxx.png]]
-        const ma = (block as BlockEntity).content.match(/[[(]..\/assets\/(.+\.(png|jpg|jpeg))[\])]/i);
-        if (ma) {
-          image = ma[1];
-          // logger.debug("asset: " + ma[1]);
-          break;
-        }
-        //            summary.push(content);
-
-        if ((block as BlockEntity).children && (block as BlockEntity).children!.length > 0) {
-          parentStack.push({
-            blocks: (block as BlockEntity).children!,
-            index: 0,
-          });
-        }
-      }
-    }
-  }
-  return [summary, image];
-};
-
-const parseOperation = (changes: FileChanges): [Operation, string] => {
-  let operation: Operation = '';
-  let originalName = '';
-  // logger.debug(changes);
-  for (const block of changes.blocks) {
-    if (Object.prototype.hasOwnProperty.call(block, 'path')) {
-      if (changes.txData.length === 0) continue;
-      if (changes.txData[0][1] === 'file/last-modified-at') {
-        const path = block.path;
-        const ma = path.match(/pages\/(.*)\.(md|org)/);
-        if (ma) {
-          const fileName = ma[1];
-
-          originalName = decodeLogseqFileName(fileName);
-
-          operation = 'modified';
-
-          // logger.debug("File modified: " + originalName);
-
-          return [operation, originalName];
-        }
-      }
-    }
-  }
-
-  for (const data of changes.txData) {
-    if (data.length === 5 && data[1] === 'block/original-name') {
-      originalName = data[2];
-      let createOrDelete: Operation = 'create';
-      if (data[4] === false) {
-        createOrDelete = 'delete';
-      }
-      else {
-        logger.debug(`created, ${originalName}`);
-      }
-      operation = createOrDelete;
-
-      return [operation, originalName];
-    }
-  }
-
-  return [operation, originalName];
-};
+import { encodeLogseqFileName, getLastUpdatedTime, getSummary, parseOperation, sleep } from './utils';
+import type { MarkdownOrOrg, PrimaryKey, SearchResultPage, FileChanges } from './types';
+import BoxCard from './components/BoxCard';
 
 const dirHandles: { [graphName: string]: FileSystemDirectoryHandle } = {};
 
@@ -250,6 +26,7 @@ function App() {
   const [open, setOpen] = useState<boolean>(false);
   const [filteredPages, setFilteredPages] = useState<PrimaryKey[]>([]);
   const [tag, setTag] = useState<string>('');
+  const [pageName, setPageName] = useState<string>('');
   const tileRef = useRef<HTMLDivElement | null>(null);
   const tagInputFieldRef = useRef<HTMLInputElement | null>(null);
   //  const appRef = useRef<HTMLDivElement | null>(null);
@@ -354,32 +131,63 @@ function App() {
 
 
   useEffect(() => {
-    // pageEntries should be reloaded when totalCardNumber is changed.
-    const filter = async (tag: string) => {
-
+    // タグ/ページ名フィルタを統合して適用（両方入力時は積集合）
+    const filter = async (tagQuery: string, nameQuery: string) => {
       setSelectedBox(0);
 
-      if (tag === '') {
+      const tagQ = tagQuery.trim();
+      const nameQ = nameQuery.trim();
+
+      if (tagQ === '' && nameQ === '') {
         setFilteredPages([]);
         return;
       }
 
-      const pageEntries: SearchResultPage[] = await logseq.DB.datascriptQuery(`
-      [:find ?name
-        :where
-        [?t :block/name ?namePattern]
-        [(clojure.string/starts-with? ?namePattern "${tag}")]
-        [?p :block/tags ?t]
-        [?p :block/original-name ?name]]
-      `);
-      if (pageEntries.length === 0) {
+      let tagPages: string[] | null = null;
+      if (tagQ !== '') {
+        const pageEntries: SearchResultPage[] = await logseq.DB.datascriptQuery(`
+        [:find ?name
+          :where
+          [?t :block/name ?namePattern]
+          [(clojure.string/include? ?namePattern "${tagQ}")]
+          [?p :block/tags ?t]
+          [?p :block/original-name ?name]]
+        `);
+        tagPages = pageEntries.map(entry => entry[0]);
+      }
+
+      let namePages: string[] | null = null;
+      if (nameQ !== '') {
+        // Dexieに登録されているページ名から部分一致（大文字小文字を無視）
+        const boxes = await db.box
+          .where('graph').equals(currentGraph)
+          .toArray();
+        const nq = nameQ.toLowerCase();
+        namePages = boxes
+          .map(b => b.name)
+          .filter(n => n.toLowerCase().includes(nq));
+      }
+
+      let result: string[] = [];
+      if (tagPages && namePages) {
+        const nameSet = new Set(namePages);
+        result = tagPages.filter(n => nameSet.has(n));
+      } else if (tagPages) {
+        result = tagPages;
+      } else if (namePages) {
+        result = namePages;
+      }
+
+      if (result.length === 0) {
         setFilteredPages([["", ""]]);
         return;
       }
-      setFilteredPages(pageEntries.map(entry => [currentGraph, entry[0]]));
+
+      setFilteredPages(result.map(name => [currentGraph, name] as PrimaryKey));
     };
-    filter(tag.toLowerCase());
-  }, [tag, currentGraph, totalCardNumber]);
+
+    filter(tag, pageName);
+  }, [tag, pageName, currentGraph, totalCardNumber]);
 
   useEffect(() => {
     const getUserConfigs = async () => {
@@ -657,6 +465,12 @@ function App() {
           case "Tab":
             return;
         }
+        // 文字入力中（どこかの入力要素にフォーカスがある）ならフォーカスを奪わない
+        const active = document.activeElement as HTMLElement | null;
+        const isTyping = !!active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+        if (isTyping) {
+          return;
+        }
         tagInputFieldRef.current?.focus();
       }
 
@@ -696,32 +510,15 @@ function App() {
     logseq.hideMainUI({ restoreEditingCursor: true });
   };
 
-  const getTimeString = (unixTime: number) => {
-    const date = new Date(unixTime);
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
-  };
-
   const boxElements = cardboxes?.map((box: Box, index) => (
-    // Do not use uuid because pagebar is not shown properly.
-    // <a href={`logseq://graph/${currentGraph}?page=${box.uuid}`}>
-    // Calling deep link is very slow. Use pushState() instead.
-    // <a href={`logseq://graph/${currentGraph}?page=${encodeURIComponent(box.originalName)}`}>
-
-    <div className={'box' + (selectedBox === index ? ' selectedBox' : '')} onClick={e => boxOnClick(box, e)} id={box.uuid}>
-      <div className='box-title'>
-        {box.name}
-      </div>
-      <div className='box-summary' style={{ display: box.image === '' ? 'block' : 'none' }}>
-        {box.summary.map(item => (<>{item}<br /></>))}
-      </div>
-      <div className='box-image' style={{ display: box.image !== '' ? 'block' : 'none' }}>
-        <img src={currentGraph.replace('logseq_local_', '') + '/assets/' + box.image} style={{ width: '140px' }} alt='(image)' />
-      </div>
-      <div className='box-date' style={{ display: 'none' }}>
-        {format(box.time, preferredDateFormat)} {getTimeString(box.time)}
-      </div>
-
-    </div>
+    <BoxCard
+      key={box.uuid}
+      box={box}
+      selected={selectedBox === index}
+      currentGraph={currentGraph}
+      preferredDateFormat={preferredDateFormat}
+      onClick={boxOnClick}
+    />
   ));
 
   return (
@@ -762,6 +559,25 @@ function App() {
                 <InputAdornment position="end">
                   <IconButton
                     onClick={() => setTag('')}
+                    edge="end"
+                  >
+                    <Clear />
+                  </IconButton>
+                </InputAdornment>
+              ),
+              inputProps: {
+                tabIndex: 1,
+              },
+            }}
+          />
+          <TextField id="page-input" size='small' label={t("filter-by-page-name")} variant="filled"
+            style={{ marginLeft: "12px", marginTop: "1px", float: "left" }}
+            value={pageName} onChange={e => setPageName(e.target.value)}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    onClick={() => setPageName('')}
                     edge="end"
                   >
                     <Clear />

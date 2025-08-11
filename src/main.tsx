@@ -39,16 +39,16 @@ function main() {
     zIndex: 20,
   })
 
-  logseq.App.registerUIItem('pagebar', {
-    key: 'cardbox',
-    template: `
-    <a data-on-click="openCardBox" title="open cardbox">
-      <span class="material-symbols-outlined">
-      grid_view
-      </span>
-    </a> 
-    `,
-  });
+  // logseq.App.registerUIItem('pagebar', {
+  //   key: 'cardbox',
+  //   template: `
+  //   <a data-on-click="openCardBox" title="open cardbox">
+  //     <span class="material-symbols-outlined">
+  //     grid_view
+  //     </span>
+  //   </a> 
+  //   `,
+  // });
 
   const cardboxDiv = document.createElement('div');
   cardboxDiv.innerHTML = `

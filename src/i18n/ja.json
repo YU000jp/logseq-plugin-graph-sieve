@@ -6,5 +6,6 @@
     "loading": "構築中...",
     "please-select-pages": "pagesという名前のフォルダを選択してください。",
     "filter-by-page-tag": "ページタグで絞り込み",
+        "filter-by-page-name": "ページ名で絞り込み",
     "cancel": "キャンセル"
 }

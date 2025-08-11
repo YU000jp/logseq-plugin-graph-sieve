@@ -20,4 +20,4 @@ export class CardBoxDexie extends Dexie {
   }
 }
 
-export const db = new CardBoxDexie('logseq-cardbox-plugin');
+export const db = new CardBoxDexie('logseq-graph-sieve-plugin');
