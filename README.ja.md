@@ -58,4 +58,8 @@ CardBox プラグインをベースに機能拡張した派生版で、内部構
 - 利用ライブラリ: React, Dexie, Material UI, @logseq/libs
 
 ## 作者
+<<<<<<< HEAD
 Author: YU000jp [<img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30"/>](https://buymeacoffee.com/yu000japan)
+=======
+Author: YU000jp
+>>>>>>> 222df079c422924ec82f6c75c557691a46ade81f
