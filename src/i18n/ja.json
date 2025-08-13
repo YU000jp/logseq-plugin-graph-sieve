@@ -11,6 +11,7 @@
     "tab-content": "内容",
     "tab-no-markdown": "マークダウンなし",
     "tab-raw": "RAW",
+    "tab-raw-custom": "RAWカスタム",
     "tab-info": "情報",
     "toggle-hide-properties": "プロパティ非表示",
     "toggle-hide-refs": "参照/埋め込みを非表示",
