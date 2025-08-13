@@ -1,81 +1,61 @@
-# Logseq Graph Sieve Plugin [<img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30"/>](https://www.buymeacoffee.com/hidekaz)
+<div align="center">
 
-A card-based navigator for [Logseq](https://github.com/logseq/logseq) that shows your pages as thumbnail cards, sorted by last update. Click a card to open a rich, multi-tab preview with copy/export tools, related/sub pages, and quick favorites/archives.
+# Logseq Graph Sieve Plugin <a href="https://www.buymeacoffee.com/hidekaz"><img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30" /></a>
 
-## Launch
-Use any of the following:
-- Toolbar button labeled “CardBox”
-- Command palette: “Open CardBox”
-- Shortcut: Ctrl+Shift+Enter (Windows) / Cmd+Shift+Enter (macOS)
+Helper tool to extract plain text from pages in your current graph or from an "old" graph folder (read‑only) using a simple card + preview interface.
 
-- Right after installation, the plugin builds its local database. While building, “Building...” appears in the top-left of the window. Don’t exit Logseq until it finishes.
+Logseq mode: load the currently opened file‑based graph.  
+Folder mode: load an external (old) graph folder for read‑only plain text extraction.
 
-## Cards and navigation
-- Cards are ordered by last updated time (top-left is newest). Only Logseq pages are shown; journals and whiteboards are not displayed. Empty pages are hidden.
-- Click a card to open it in the plugin’s preview sidebar. Shift+Click opens it directly in Logseq.
-- Keyboard:
-  - Arrow keys: Move selection
-  - Enter: Open selected card in the plugin preview
-  - Shift+Enter: Open selected card in Logseq
-  - Esc: Close the plugin window
+</div>
 
-## Filtering
-- Two quick filters in the top bar:
-  - Filter by Page Tag: type to narrow by “page tags”
-  - Filter by Page Name: partial match on page titles
-- Typing when no input is focused will jump to the tag filter automatically.
+[日本語](./README.ja.md) | English
 
-What is a page tag? See below:
+## What is it?
+Graph Sieve focuses on three things:
 
-![page tag](./images/pagetag.png)
+- Switch between the active Logseq graph and any read‑only folder (Folder Mode)
+- Clean / normalize text: remove properties, refs, embeds, blank lines, [[Page]] brackets, page refs
+- Additional normalization: always‑hide property keys, arbitrary string removal (removeStrings), hide query blocks
 
-## Preview sidebar
-Open a card to see a multi-tab preview with tools:
+It is a feature‑extended derivative of the CardBox plugin with a reworked internal structure and settings model.
 
-- Tabs
-  - Content: render page blocks (toggle “Hide properties” and “Hide refs/embeds”)
-  - No Markdown: plain text with formatting removed
-  - RAW: outline of first lines for a compact overview
-- Controls
-  - Copy content: copies the current tab’s text view to the clipboard
-  - Open in Logseq: jumps to the page in Logseq
-  - Close / Close all tabs
-- Options
-  - Always hide properties: a comma-separated list of property keys to always hide (e.g., author, source). “id” and “collapsed” are always hidden.
-- Navigation helpers
-  - Breadcrumbs for hierarchical page names (click to open that part)
-  - Sub pages section (direct children like Parent/Child)
-  - Related section (name-token similarity, excluding links already shown in Content)
-- Favorites and archive
-  - Star to favorite a page (plugin-local). Favorites also appear in a list at the bottom of the left pane.
-  - Archive to dim a page in views (doesn’t delete it).
+## Usage
+1. Launch (toolbar icon).
+2. Close with `Esc` or by clicking outside.
+3. On launch you see a card list for the current graph.  
+  > Use the button on the right side to switch to Folder Mode.
+4. Click a card to open it in the right‑hand preview (a tab opens).
+5. Inside a tab you can switch view type, copy text, open in Logseq, or create a new page in Logseq from the content.
 
-## Closing
-- Click the close icon in the top-right, press Esc, or click outside the window to close.
+## Preview Tab Types
+- Content: Rendered style blocks (with property / ref hiding applied)
+- No Markdown: Plain text with markup stripped
+- Raw: Original markdown (after removal of Logseq‑specific artifacts)
 
-## Rebuild and timestamps
-- For accurate “last updated” sorting, click Rebuild and select your graph’s pages folder (Graph/pages). When the pages folder is selected, file timestamps are used; otherwise Logseq’s page timestamps are used.
-- After re-indexing in Logseq or editing files outside Logseq, press Rebuild to refresh order and content if needed.
+## Text Cleanup Options
+| Option | Purpose |
+|--------|---------|
+| Hide properties | Remove properties from rendered output |
+| Always hide properties | Comma separated property keys to always hide |
+| Strip [[...]] brackets | [[Page Title]] → Page Title |
+| Remove page refs | Show plain text (no link) |
+| Hide query blocks | Remove {{query ...}} blocks |
+| String removal (removeStrings) | Delete listed substrings from body & copy output |
 
-## Languages
-- English
-- Japanese
+Settings persist in localStorage.
 
-Restart Logseq after changing language to apply it.
-
-## Limitations
-- Empty pages aren’t shown.
-- Pages whose title ends with a slash (e.g., `MyPage/`) can’t be handled correctly.
-- If Logseq cannot manage page modification time correctly, use Rebuild and select the pages folder to force reading file timestamps.
-  - See https://github.com/logseq/logseq/issues/8556
-
-## Support
-
-If you like it, please consider supporting development.
-
-[![donate](https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png)](https://www.buymeacoffee.com/hidekaz)
+## Limitations / Notes
+- Folder Mode cannot fully reproduce Logseq hierarchy / metadata.
+- Whiteboards / temporary in‑progress files are ignored.
+- Formatting may differ slightly from native Logseq rendering.
 
 ## Credits
+- Based on / inspired by: [CardBox](https://github.com/sosuisen/logseq-cardbox) by [sosuisen](https://github.com/sosuisen)
+- Libraries: React, Dexie, Material UI, @logseq/libs
 
-- This plugin is based on the CardBox plugin created by Hidekazu Kubota (sosuisen): https://github.com/sosuisen/logseq-cardbox (author profile: https://github.com/sosuisen)
-- The Buy Me a Coffee button above links to Mr. Kubota’s page to support his work.
+## Author
+Author: YU000jp
+
+---
+Japanese README: see README.ja.md
