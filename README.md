@@ -1,6 +1,6 @@
 <div align="center">
 
-# Logseq Graph Sieve Plugin <a href="https://www.buymeacoffee.com/hidekaz"><img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30" /></a>
+# Logseq Graph Sieve Plugin
 
 Helper tool to extract plain text from pages in your current graph or from an "old" graph folder (read‑only) using a simple card + preview interface.
 
