@@ -51,11 +51,8 @@ Settings persist in localStorage.
 - Formatting may differ slightly from native Logseq rendering.
 
 ## Credits
-- Based on / inspired by: [CardBox](https://github.com/sosuisen/logseq-cardbox) by [sosuisen](https://github.com/sosuisen)
+- Based on / inspired by: [CardBox](https://github.com/sosuisen/logseq-cardbox) by [sosuisen](https://github.com/sosuisen)  [<img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30"/>](https://www.buymeacoffee.com/hidekaz)
 - Libraries: React, Dexie, Material UI, @logseq/libs
 
 ## Author
-Author: YU000jp
-
----
-Japanese README: see README.ja.md
+Author: YU000jp [<img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30"/>](https://buymeacoffee.com/yu000japan)

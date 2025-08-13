@@ -1,10 +1,10 @@
-# Logseq Graph Sieve Plugin [<img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30"/>](https://www.buymeacoffee.com/hidekaz)
-
+# Logseq Graph Sieve プラグイン
 <div align="center">
 
 旧グラフのファイルから、プレーンテキストを取得するための支援ツール(プラグイン)です。
 
 Logseqモード: 現在のファイルベースグラフを読み込み
+
 フォルダモード: 旧グラフのフォルダを読み込み
 
 </div>
@@ -54,8 +54,8 @@ CardBox プラグインをベースに機能拡張した派生版で、内部構
 - 一部書式が Logseq 本体と完全一致しない場合があります。
 
 ## クレジット
-- 派生元: [CardBox](https://github.com/sosuisen/logseq-cardbox) (by [sosuisen](https://github.com/sosuisen)) を参考に再構築
+- 派生元: [CardBox](https://github.com/sosuisen/logseq-cardbox) (by [sosuisen](https://github.com/sosuisen)) を参考に再構築 [<img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30"/>](https://www.buymeacoffee.com/hidekaz)
 - 利用ライブラリ: React, Dexie, Material UI, @logseq/libs
 
 ## 作者
-Author: YU000jp
+Author: YU000jp [<img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30"/>](https://buymeacoffee.com/yu000japan)
