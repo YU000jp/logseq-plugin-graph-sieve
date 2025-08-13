@@ -1,4 +1,3 @@
-import { format } from 'date-fns';
 import React from 'react';
 import StarIcon from '@mui/icons-material/Star';
 import type { Box } from '../db';
@@ -12,27 +11,35 @@ interface Props {
   displayName?: string; // optional: override title shown on the card
 }
 
-const getTimeString = (unixTime: number) => {
-  const date = new Date(unixTime);
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
-};
+// 時刻はカード上では使用しないため削除（日時フォーマットは preferredDateFormat 任せ）
 
-export const BoxCard: React.FC<Props> = ({ box, selected, currentGraph, preferredDateFormat, onClick, displayName }) => {
+export const BoxCard: React.FC<Props> = ({ box, selected, currentGraph, preferredDateFormat: _preferredDateFormat, onClick, displayName }) => {
+  const title = displayName ?? box.name;
+  const totalLines = box.summary?.length || 0;
+  const maxPreviewLines = 12; // 表示したい視覚行数（line-clamp 用）
+  // clamp 判定は論理行数で近似（折り返しは未計測）
+  const truncated = totalLines > maxPreviewLines;
+  // テキスト: 多すぎる場合は安全のため上限 (例: 400 行) まで
+  const joined = (box.summary || []).slice(0, 400).join('\n');
+  // 文字数カウント (全 summary ベース / 改行含む)
   return (
-    <div className={'box' + (selected ? ' selectedBox' : '') + (box.archived ? ' archived' : '')} onClick={e => onClick(box, e)} id={box.uuid}>
-      <div className='box-title'>
-  {displayName ?? box.name}
-  {box.favorite ? <StarIcon fontSize='inherit' style={{ color: '#f5b301', float: 'right', marginRight: 4 }} /> : null}
+    <div className={'box card-modern' + (selected ? ' selectedBox' : '') + (box.archived ? ' archived' : '')} onClick={e => onClick(box, e)} id={box.uuid}>
+      <div className='card-head'>
+        <div className='card-title' title={title}>{title}</div>
+        {box.favorite && <span className='card-badge fav' title='Favorite'><StarIcon fontSize='inherit' /></span>}
+        {box.archived && <span className='card-badge archived-badge' title='Archived'>A</span>}
       </div>
-      <div className='box-summary' style={{ display: box.image === '' ? 'block' : 'none' }}>
-        {box.summary.map((item, i) => (<React.Fragment key={i}>{item}<br /></React.Fragment>))}
-      </div>
-      <div className='box-image' style={{ display: box.image !== '' ? 'block' : 'none' }}>
-        <img src={currentGraph.replace('logseq_local_', '') + '/assets/' + box.image} style={{ width: '140px' }} alt='(image)' />
-      </div>
-      <div className='box-date' style={{ display: 'none' }}>
-        {format(box.time, preferredDateFormat)} {getTimeString(box.time)}
-      </div>
+      {box.image && (
+        <div className='card-media'>
+          <img src={currentGraph.replace('logseq_local_', '') + '/assets/' + box.image} alt='(image)' loading='lazy' />
+        </div>
+      )}
+      {(!box.image && box.summary && box.summary.length > 0) && (
+        <div className={'card-body' + (truncated ? ' truncated' : '')} data-lines={totalLines} data-max={maxPreviewLines}>
+          <div className='card-body-text'>{joined}</div>
+        </div>
+      )}
+  <div className='card-meta'></div>
     </div>
   );
 };

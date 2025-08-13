@@ -11,9 +11,14 @@
     "tab-content": "Content",
     "tab-no-markdown": "No Markdown",
     "tab-raw": "RAW",
+    "tab-raw-custom": "RAW-custom",
     "tab-info": "Info",
     "toggle-hide-properties": "Hide properties",
     "toggle-hide-refs": "Hide refs/embeds",
+    "toggle-strip-page-brackets": "Strip [[ ]] brackets",
+    "toggle-page-links": "Enable page links",
+    "toggle-hide-page-refs": "Hide page refs",
+    "toggle-hide-queries": "Hide queries",
     "always-hide-props": "Always hide properties",
     "always-hide-props-ph": "e.g. author,source",
     "open-in-logseq": "Open in Logseq",
@@ -27,10 +32,20 @@
     "file-modified": "File modified",
     "backlinks": "Backlinks",
     "related": "Related",
+    "subpages": "Sub pages",
+    "subpages-deeper-notice": "(No direct children. Showing deeper descendant pages.)",
     "favorites": "Favorites",
     
     "favorite": "Favorite",
     "unfavorite": "Unfavorite",
     "close-all-tabs": "Close all tabs"
-        , "graph-label": "Graph"
+        , "graph-label": "Graph",
+    "detached-mode": "Detached mode",
+    "detached-mode-hint": "Show pages from all graphs (cannot open directly in Logseq)",
+    "exclude-journals": "Exclude journals",
+    "exclude-journals-hint": "Toggle to include or exclude journal pages",
+    "remove-strings": "Remove strings",
+    "remove-strings-ph": "e.g. draft,TODO,foo",
+    "raw-toggle-full": "Full source",
+    "raw-toggle-summary": "Summary"
 }

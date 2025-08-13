@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Box } from '../db';
 import BoxCard from './BoxCard';
 
@@ -11,10 +12,11 @@ type Props = {
 };
 
 const SubpagesSection: React.FC<Props> = ({ parentName, items, currentGraph, preferredDateFormat, onClick }) => {
+  const { t } = useTranslation();
   if (!items || items.length === 0) return null;
   return (
     <div className='sidebar-subpages'>
-      <div className='subpages-title'>Sub pages</div>
+  <div className='subpages-title'>{t('subpages')}</div>
       <div className='cards-grid'>
         {items.map((box) => {
           const short = box.name.startsWith(parentName + '/') ? box.name.slice(parentName.length + 1) : box.name;

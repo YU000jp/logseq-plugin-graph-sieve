@@ -32,6 +32,8 @@ export const decodeLogseqFileName = (name: string) => {
     .replace(/^(CON|PRN|AUX|NUL|COM1|COM2|COM3|COM4|COM5|COM6|COM7|COM8|COM9|LPT1|LPT2|LPT3|LPT4|LPT5|LPT6|LPT7|LPT8|LPT9)___$/, '$1')
     .replace(/\.___$/, '.')
     .replace(/%5F___%5F/g, '_/_')
+  // Treat encoded forward slash (%2F) as path separator
+  .replace(/%2F/gi, '/')
     .replace(/%3C/g, '<')
     .replace(/%3E/g, '>')
     .replace(/%3A/g, ':')
@@ -157,6 +159,35 @@ export const getSummary = (blocks: BlockEntity[]): [string[], string] => {
         }
       }
     }
+  }
+  return [summary, image];
+};
+
+// Lightweight summary generator from raw page text (when block tree not available yet)
+export const getSummaryFromRawText = (text: string): [string[], string] => {
+  const maxChars = 100;
+  const summary: string[] = [];
+  let total = 0;
+  let image = '';
+  const lines = text.split(/\r?\n/);
+  const isProperty = (l: string) => /\w+::\s+/.test(l) || l.trim() === '---';
+  for (const raw of lines) {
+    if (summary.length >= 10) break; // cap lines
+    if (!raw.trim()) continue;
+    if (isProperty(raw)) continue;
+    const capped = raw.slice(0, maxChars - total);
+    if (capped.length > 0) {
+      summary.push(capped);
+      total += capped.length;
+      if (total >= maxChars) break;
+    }
+  }
+  // Simple image detection (first image asset)
+  for (const raw of lines) {
+    const mdImg = raw.match(/!\[[^\]]*\]\(\.\.\/assets\/([^\)]+\.(?:png|jpg|jpeg))\)/i);
+    const orgImg = raw.match(/\[\[(\.\.\/assets\/([^\]]+\.(?:png|jpg|jpeg)))\]\]/i);
+    if (mdImg) { image = mdImg[1]; break; }
+    if (orgImg) { image = orgImg[2]; break; }
   }
   return [summary, image];
 };

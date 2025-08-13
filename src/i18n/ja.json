@@ -14,6 +14,10 @@
     "tab-info": "情報",
     "toggle-hide-properties": "プロパティ非表示",
     "toggle-hide-refs": "参照/埋め込みを非表示",
+    "toggle-strip-page-brackets": "[[ ]] 括弧を外す",
+    "toggle-page-links": "ページリンクを有効",
+    "toggle-hide-page-refs": "ページ参照を非表示",
+    "toggle-hide-queries": "クエリブロックを非表示",
     "always-hide-props": "常に除外するプロパティ",
     "always-hide-props-ph": "例: author,source",
     "open-in-logseq": "Logseqで開く",
@@ -27,10 +31,19 @@
     "file-modified": "ファイル更新日時",
     "backlinks": "バックリンク",
     "related": "関連",
+    "subpages": "サブページ",
+    "subpages-deeper-notice": "(直下の子ページが無いため下位階層ページを表示しています)",
     "favorites": "お気に入り",
-    
     "favorite": "お気に入り",
     "unfavorite": "お気に入り解除",
     "close-all-tabs": "すべてのタブを閉じる"
-        , "graph-label": "グラフ"
+        , "graph-label": "グラフ",
+    "detached-mode": "非連動モード",
+    "detached-mode-hint": "全グラフのページを表示 (Logseq本体では開けません)",
+    "exclude-journals": "ジャーナル除外",
+    "exclude-journals-hint": "ジャーナルページを含める/除外する切替",
+    "remove-strings": "文字列除去",
+    "remove-strings-ph": "例: 下書き,TODO,foo",
+    "raw-toggle-full": "フルソース",
+    "raw-toggle-summary": "要約"
 }
