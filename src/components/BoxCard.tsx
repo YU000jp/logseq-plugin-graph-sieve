@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import StarIcon from '@mui/icons-material/Star';
 import type { Box } from '../db';
 
@@ -13,7 +13,7 @@ interface Props {
 
 // 時刻はカード上では使用しないため削除（日時フォーマットは preferredDateFormat 任せ）
 
-export const BoxCard: React.FC<Props> = ({ box, selected, currentGraph, preferredDateFormat: _preferredDateFormat, onClick, displayName }) => {
+const BoxCardComp: React.FC<Props> = ({ box, selected, currentGraph, preferredDateFormat: _preferredDateFormat, onClick, displayName }) => {
   const title = displayName ?? box.name;
   const totalLines = box.summary?.length || 0;
   const maxPreviewLines = 12; // 表示したい視覚行数（line-clamp 用）
@@ -44,4 +44,25 @@ export const BoxCard: React.FC<Props> = ({ box, selected, currentGraph, preferre
   );
 };
 
+const areEqual = (prev: Props, next: Props) => {
+  const pb = prev.box, nb = next.box;
+  const boxEqual = (
+    pb.graph === nb.graph &&
+    pb.name === nb.name &&
+    (pb.uuid || '') === (nb.uuid || '') &&
+    (pb.favorite || false) === (nb.favorite || false) &&
+    (pb.archived || false) === (nb.archived || false) &&
+    (pb.image || '') === (nb.image || '') &&
+    (pb.time || 0) === (nb.time || 0) &&
+    // summary は参照一致で十分（変更時は新配列が入ることが多い）
+    pb.summary === nb.summary
+  );
+  return boxEqual &&
+    prev.selected === next.selected &&
+    prev.currentGraph === next.currentGraph &&
+    (prev.displayName || '') === (next.displayName || '') &&
+    prev.preferredDateFormat === next.preferredDateFormat;
+};
+
+export const BoxCard = memo(BoxCardComp, areEqual);
 export default BoxCard;

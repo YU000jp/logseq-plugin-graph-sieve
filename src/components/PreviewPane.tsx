@@ -9,7 +9,7 @@ import StarIcon from '@mui/icons-material/Star';
 import Clear from '@mui/icons-material/Clear';
 import { ContentCopy } from '@mui/icons-material';
 import type { Box } from '../db';
-import BoxCard from './BoxCard';
+import CardList from './CardList';
 import { BlockList, hasRenderableContent } from './BlockList';
 import { PlainTextView, RawCustomView, blocksToPlainText, outlineTextFromBlocks, flattenBlocksToText, type BlockNode } from '../utils/blockText';
 import { normalizeTaskLines as normalizeTaskLinesUtil, removeMacroTokens as removeMacroTokensUtil } from '../utils/text';
@@ -268,13 +268,29 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
                 <div className='sidebar-subpages'>
                   <div className='subpages-title'>{t('subpages')}</div>
           {subpagesDeeper && <div className='subpages-notice'>{t('subpages-deeper-notice')}</div>}
-          <div className='cards-grid'>{subpages.map(b => (<BoxCard key={`sub-${b.graph}-${b.name}`} box={b} selected={false} currentGraph={currentGraph} preferredDateFormat={preferredDateFormat} onClick={boxOnClick} displayName={displayTitle(b.name)} />))}</div>
+          <CardList
+            items={subpages}
+            currentGraph={currentGraph}
+            preferredDateFormat={preferredDateFormat}
+            onClick={boxOnClick}
+            displayNameFor={(b) => displayTitle(b.name)}
+            keyPrefix='sub'
+          />
                 </div>
               </div>}
         {relatedPresent && <div className='sidebar-pane sidebar-pane-related' style={{ flex: relFlex }} onMouseEnter={() => setHoveredSidePane('rel')} onMouseLeave={() => setHoveredSidePane(p => p === 'rel' ? null : p)}>
                 <div className='sidebar-subpages related-subpages'>
                   <div className='subpages-title'>{t('related') || 'Related'}</div>
-                  {filteredRelated.length === 0 ? <div className='sidebar-empty'>{t('no-content')}</div> : <div className='cards-grid'>{filteredRelated.map(b => (<BoxCard key={`rel-${b.graph}-${b.name}`} box={b} selected={false} currentGraph={currentGraph} preferredDateFormat={preferredDateFormat} onClick={boxOnClick} displayName={displayTitle(b.name)} />))}</div>}
+                  {filteredRelated.length === 0 ? <div className='sidebar-empty'>{t('no-content')}</div> : (
+                    <CardList
+                      items={filteredRelated}
+                      currentGraph={currentGraph}
+                      preferredDateFormat={preferredDateFormat}
+                      onClick={boxOnClick}
+                      displayNameFor={(b) => displayTitle(b.name)}
+                      keyPrefix='rel'
+                    />
+                  )}
                 </div>
               </div>}
             </>

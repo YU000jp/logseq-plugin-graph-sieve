@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Box } from '../db';
-import BoxCard from './BoxCard';
+import CardList from './CardList';
 
 type Props = {
   parentName: string;
@@ -17,22 +17,14 @@ const SubpagesSection: React.FC<Props> = ({ parentName, items, currentGraph, pre
   return (
     <div className='sidebar-subpages'>
   <div className='subpages-title'>{t('subpages')}</div>
-      <div className='cards-grid'>
-        {items.map((box) => {
-          const short = box.name.startsWith(parentName + '/') ? box.name.slice(parentName.length + 1) : box.name;
-          return (
-            <BoxCard
-              key={`sub-${box.graph}-${box.name}`}
-              box={box}
-              selected={false}
-              currentGraph={currentGraph}
-              preferredDateFormat={preferredDateFormat}
-              onClick={onClick}
-              displayName={short}
-            />
-          );
-        })}
-      </div>
+      <CardList
+        items={items}
+        currentGraph={currentGraph}
+        preferredDateFormat={preferredDateFormat}
+        onClick={onClick}
+        displayNameFor={(b) => (b.name.startsWith(parentName + '/') ? b.name.slice(parentName.length + 1) : b.name)}
+        keyPrefix='sub'
+      />
     </div>
   );
 };

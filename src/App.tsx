@@ -21,7 +21,7 @@ import { boxService } from './services/boxService';
 // query services are used within rebuildService
 import { getString, setString, getBoolean, setBoolean, getNumber, setNumber, remove as lsRemove } from './utils/storage';
 import type { MarkdownOrOrg, FileChanges } from './types';
-import BoxCard from './components/BoxCard';
+import CardList from './components/CardList';
 import { displayTitle as displayTitleUtil, journalDayWeek as journalDayWeekUtil } from './utils/journal';
 import PreviewTabs from './components/PreviewTabs';
 import PreviewPane from './components/PreviewPane';
@@ -85,6 +85,8 @@ function App() {
   const [logseqCurrentGraph, setLogseqCurrentGraph] = useState<string>('');
   // 明示的モード: Logseq既存グラフ or フォルダ(fs_)
   const [graphMode, setGraphMode] = useState<'logseq' | 'folder'>(() => (getString('graphMode', 'logseq') === 'folder' ? 'folder' : 'logseq'));
+  // モード選択ダイアログは常に最初に表示（保存値があっても再選択させる）
+  const [modeChosen, setModeChosen] = useState<boolean>(false);
   // Sidebar preview sessions (multi-preview)
   type PreviewTab = 'content' | 'nomark' | 'outline' | 'raw-custom';
   type Preview = { box: Box; blocks: any[] | null; loading: boolean; tab: PreviewTab; pinned: boolean; createdAt: number };
@@ -154,8 +156,9 @@ function App() {
   useEffect(() => { setBoolean('hideQueries', hideQueries); }, [hideQueries]);
   useEffect(() => { setString('removeStrings', removeStringsRaw); }, [removeStringsRaw]);
   // detachedMode は自動判定なので保存しない
-  useEffect(() => { setString('graphMode', graphMode); }, [graphMode]);
+  useEffect(() => { if (modeChosen) setString('graphMode', graphMode); }, [graphMode, modeChosen]);
   useEffect(() => {
+    if (!modeChosen) return;
     const syncGraph = async () => {
       try {
         const { currentGraph: cg } = await logseq.App.getUserConfigs();
@@ -176,10 +179,24 @@ function App() {
     const handler = ({ visible }: any) => { if (visible) syncGraph(); };
     logseq.on('ui:visible:changed', handler);
     return () => { clearInterval(id); try { (logseq as any).off && (logseq as any).off('ui:visible:changed', handler); } catch { /* ignore */ } };
-  }, [currentGraph, graphMode]);
+  }, [modeChosen, currentGraph, graphMode]);
+
+  // UI 表示時（ツールバーから開かれたとき等）は毎回モード選択から開始する
+  useEffect(() => {
+    const handler = ({ visible }: any) => {
+      if (visible) {
+        setModeChosen(false);
+      }
+    };
+    logseq.on('ui:visible:changed', handler);
+    return () => {
+      try { (logseq as any).off && (logseq as any).off('ui:visible:changed', handler); } catch { /* ignore */ }
+    };
+  }, []);
 
   // graphMode が logseq に戻った時 currentGraph を即同期
   useEffect(() => {
+    if (!modeChosen) return;
     if (graphMode === 'logseq') {
       (async () => {
         try {
@@ -188,10 +205,11 @@ function App() {
         } catch {/* ignore */}
       })();
     }
-  }, [graphMode]);
+  }, [modeChosen, graphMode]);
 
   // 起動時: folderモード復元だが DirectoryHandle が無い場合は logseq に自動復帰
   useEffect(() => {
+    if (!modeChosen) return;
     if (graphMode === 'folder') {
       const hasHandle = currentDirHandle || (currentGraph && dirHandles[currentGraph]);
       if (!hasHandle) {
@@ -206,7 +224,7 @@ function App() {
         })();
       }
     }
-  }, [graphMode, currentGraph, currentDirHandle]);
+  }, [modeChosen, graphMode, currentGraph, currentDirHandle]);
 
   // detachedMode のグローバル共有（App 以外に定義された補助レンダリング関数で参照）
   useEffect(() => {
@@ -226,6 +244,7 @@ function App() {
 
   const cardboxes = useLiveQuery(
     () => {
+      if (!modeChosen) return Promise.resolve([] as Box[]);
       if (graphMode === 'folder') {
         return (async () => {
           const all = await boxService.allByGraph(currentGraph);
@@ -236,14 +255,14 @@ function App() {
       if (detachedMode) return boxService.recentAll(maxBoxNumber);
       return boxService.recent(currentGraph, maxBoxNumber);
     },
-    [currentGraph, maxBoxNumber, detachedMode, graphMode]
+    [modeChosen, currentGraph, maxBoxNumber, detachedMode, graphMode]
   );
   
   // モードやグラフ変更時に再構築をトリガー（ロック/キャンセルで競合回避）
   useEffect(() => {
-    if (!currentGraph) return;
+    if (!modeChosen || !currentGraph) return;
     (async () => { try { await rebuildDB(); } catch { /* ignore */ } })();
-  }, [graphMode, currentGraph]);
+  }, [modeChosen, graphMode, currentGraph]);
   
   // スクロールに応じて追加ロード（動的測定した行高を利用）
   useTileGridMeasure({
@@ -262,6 +281,7 @@ function App() {
   // computeRowHeight は useTileGridMeasure に含めた
 
   useEffect(() => {
+    if (!modeChosen || graphMode !== 'logseq') return;
     const getUserConfigs = async () => {
       const { currentGraph, preferredDateFormat, preferredLanguage, preferredFormat } = await logseq.App.getUserConfigs();
       setCurrentGraph(currentGraph);
@@ -278,7 +298,7 @@ function App() {
 
       setCurrentGraph(currentGraph);
     });
-  }, []);
+  }, [modeChosen, graphMode]);
 
   const rebuildDB = useCallback(async () => {
     await rebuildDatabase({
@@ -308,6 +328,7 @@ function App() {
   useEffect(() => { void rebuildDB(); }, [rebuildDB]);
 
   useEffect(() => {
+    if (!modeChosen) return;
     const onFileChanged = async (changes: FileChanges) => {
       const [operation, originalName] = parseOperation(changes);
 
@@ -361,7 +382,7 @@ function App() {
     return () => {
       removeOnChanged();
     }
-  }, [currentGraph]);
+  }, [modeChosen, currentGraph]);
 
   // キーボードナビゲーションのフックは、依存（visibleMainBoxes/openInSidebar）定義以降に呼ぶ
 
@@ -839,6 +860,26 @@ function App() {
     setGraphMode('folder');
   }, [currentGraph, t]);
 
+  // 初回モード選択ダイアログのハンドラ
+  const chooseLogseqMode = useCallback(async () => {
+    setModeChosen(true);
+    setGraphMode('logseq');
+    try {
+      const { currentGraph, preferredDateFormat, preferredLanguage, preferredFormat } = await logseq.App.getUserConfigs();
+      setCurrentGraph(currentGraph);
+      setPreferredDateFormat(preferredDateFormat);
+      setPreferredFormat(preferredFormat);
+      i18n.changeLanguage(preferredLanguage);
+    } catch {/* ignore */}
+  }, []);
+
+  const chooseFolderMode = useCallback(async () => {
+    try {
+      await openDirectoryPicker();
+      setModeChosen(true);
+    } catch {/* user cancelled or failed; keep dialog open */}
+  }, [openDirectoryPicker]);
+
   // モード切替ボタンハンドラ
   const handleToggleMode = useCallback(async () => {
     if (graphMode === 'logseq') {
@@ -1042,17 +1083,18 @@ function App() {
     return journalBoxes.filter(b => hasNonTrivialSummary(b)).length;
   }, [journalBoxes]);
 
-  const boxElements = visibleMainBoxes.map((box: Box, index) => (
-    <BoxCard
-      key={box.uuid || box.name}
-      box={box}
-      selected={selectedBox === index}
+  const boxElements = (
+    <CardList
+      items={visibleMainBoxes}
       currentGraph={currentGraph}
       preferredDateFormat={preferredDateFormat}
       onClick={boxOnClick}
-      displayName={displayTitle(box.name)}
+      displayNameFor={(b)=>displayTitle(b.name)}
+      keyPrefix='main'
+      wrapper={false}
+      isSelected={(_, idx)=> selectedBox === idx}
     />
-  ));
+  );
 
   // Keyboard navigation over the tile grid
   useKeyboardNavigation({
@@ -1097,13 +1139,29 @@ function App() {
   // (removed duplicate visibleMainBoxes / misplaced toggle)
   return (
     <>
-      {cardsUpdating && (
+      {/* 初回モード選択ダイアログ */}
+      <Dialog open={!modeChosen} onClose={()=>{}} maxWidth='xs' fullWidth>
+        <DialogTitle>{t('mode-choose-title')}</DialogTitle>
+        <DialogContent dividers>
+          <div style={{display:'flex',flexDirection:'column',gap:12}}>
+            <div>{t('mode-choose-desc')}</div>
+            <div style={{fontSize:12,opacity:.75}}>{t('mode-choose-logseq-desc')}</div>
+            <div style={{fontSize:12,opacity:.75}}>{t('mode-choose-folder-desc')}</div>
+          </div>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={chooseLogseqMode} variant='outlined'>{t('mode-choose-logseq-btn')}</Button>
+          <Button onClick={chooseFolderMode} variant='contained'>{t('mode-choose-folder-btn')}</Button>
+        </DialogActions>
+      </Dialog>
+      {modeChosen && cardsUpdating && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.05)', zIndex: 9999, cursor: 'progress' }}>
           <div style={{ position:'absolute', top:'12px', right:'12px', padding:'6px 10px', background:'#fff', border:'1px solid #ddd', borderRadius:6, boxShadow:'0 2px 8px rgba(0,0,0,0.06)', fontSize:12 }}>
             Updating cards...
           </div>
         </div>
       )}
+      {modeChosen && (
       <div className='control'>
         <div className='control-left'>
           <div className='loading' style={{ display: loading ? 'block' : 'none' }}>{t('loading')}</div>
@@ -1139,6 +1197,8 @@ function App() {
           <Clear className='clear-btn' onClick={() => logseq.hideMainUI({ restoreEditingCursor: true })} style={{ cursor: 'pointer', float: 'right', marginTop: 10, marginRight: 24 }} />
         </div>
   </div>
+  )}
+  {modeChosen && (
   <PreviewTabs
     previews={previews as any}
     activeIndex={activePreviewIndex}
@@ -1151,6 +1211,9 @@ function App() {
     displayTitle={displayTitle}
     t={t}
   />
+  )}
+  {modeChosen && (
+  <>
   <div className='content'>
         <Dialog open={globalSettingsOpen} onClose={()=> setGlobalSettingsOpen(false)} maxWidth='sm' fullWidth>
           <DialogTitle style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
@@ -1192,7 +1255,18 @@ function App() {
           <div id='tile' ref={tileRef} tabIndex={2}>{boxElements}</div>
           <div className='left-favorites'>
             <div className='favorites-header'><div className='favorites-title'>{t('favorites') || 'Favorites'}</div></div>
-            {leftFavorites.length === 0 ? <div className='sidebar-empty'>{t('no-content')}</div> : <div className='cards-grid'>{leftFavorites.map(b => (<BoxCard key={`left-fav-${b.graph}-${b.name}`} box={b} selected={false} currentGraph={currentGraph} preferredDateFormat={preferredDateFormat} onClick={boxOnClick} displayName={displayTitle(b.name)} />))}</div>}
+            {leftFavorites.length === 0 ? (
+              <div className='sidebar-empty'>{t('no-content')}</div>
+            ) : (
+              <CardList
+                items={leftFavorites}
+                currentGraph={currentGraph}
+                preferredDateFormat={preferredDateFormat}
+                onClick={boxOnClick}
+                displayNameFor={(b) => displayTitle(b.name)}
+                keyPrefix='left-fav'
+              />
+            )}
           </div>
           {(((graphMode === 'folder') || (!excludeJournals)) && journalBoxes.length > 0) && (
             <div className={'left-journals' + (collapseJournals ? ' collapsed' : '')} onScroll={e => {
@@ -1206,11 +1280,15 @@ function App() {
               {!collapseJournals && groupedJournals.map(g => (
                 <div key={g.key} style={{ marginBottom: 12 }}>
                   <div style={{ fontSize:11, fontWeight:600, letterSpacing:0.5, margin:'6px 0 4px', borderBottom:'1px solid #ddd', paddingBottom:2 }}>{g.label}</div>
-                  <div className='journals-grid'>
-                    {g.items.map(j => (
-                      <BoxCard key={`journal-${j.graph}-${j.name}`} box={j} selected={false} currentGraph={currentGraph} preferredDateFormat={preferredDateFormat} onClick={boxOnClick} displayName={journalDayWeek(j.name)} />
-                    ))}
-                  </div>
+                  <CardList
+                    items={g.items}
+                    currentGraph={currentGraph}
+                    preferredDateFormat={preferredDateFormat}
+                    onClick={boxOnClick}
+                    displayNameFor={(j) => journalDayWeek(j.name)}
+                    keyPrefix='journal'
+                    gridClassName='journals-grid'
+                  />
                 </div>
               ))}
               {!collapseJournals && journalLimit < journalBoxes.length && (
@@ -1272,8 +1350,10 @@ function App() {
             />
           ) : <div className='sidebar-placeholder'>{t('sidebar-placeholder')}</div>}
         </aside>
-      </div>
-      <div className='footer'>{t('footer')}</div>
+    </div>
+  <div className='footer'>{t('footer')}</div>
+  </>
+  )}
   {/* (Create Page Dialog removed) */}
       
     </>

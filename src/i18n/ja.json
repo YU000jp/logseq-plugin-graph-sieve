@@ -57,4 +57,10 @@
     ,"toggle-normalize-tasks": "タスク一般化"
     ,"toggle-remove-macros-help": "{{renderer ...}} 等のクエリ以外のマクロや独自マクロを除去"
     ,"toggle-normalize-tasks-help": "TODO / DOING / DONE / LATER / NOW / WAITING / CANCELLED をMarkdownチェックボックスへ変換"
+    ,"mode-choose-title": "モードを選択"
+    ,"mode-choose-desc": "グラフの読み取り方法を選んでください:"
+    ,"mode-choose-logseq-desc": "Logseqモード: 現在 Logseq で開いているグラフを使用します。"
+    ,"mode-choose-folder-desc": "フォルダモード: Logseqなしで閲覧するために pages フォルダを選択します。"
+    ,"mode-choose-logseq-btn": "Logseq モード"
+    ,"mode-choose-folder-btn": "フォルダ モード"
 }

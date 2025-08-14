@@ -58,4 +58,10 @@
     ,"toggle-normalize-tasks": "Normalize tasks"
     ,"toggle-remove-macros-help": "Remove non-query macros like {{renderer ...}} or custom macros"
     ,"toggle-normalize-tasks-help": "Convert task keywords (TODO, DOING, DONE, LATER, NOW, WAITING, CANCELLED) to markdown checkboxes"
+    ,"mode-choose-title": "Choose Mode"
+    ,"mode-choose-desc": "Select how to read your graph:"
+    ,"mode-choose-logseq-desc": "Logseq Mode: Use the currently opened Logseq graph."
+    ,"mode-choose-folder-desc": "Folder Mode: Pick a pages folder to browse without Logseq."
+    ,"mode-choose-logseq-btn": "Logseq Mode"
+    ,"mode-choose-folder-btn": "Folder Mode"
 }
