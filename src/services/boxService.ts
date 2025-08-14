@@ -25,6 +25,10 @@ export const boxService = {
       .limit(limit)
       .toArray();
   },
+  async recentAll(limit: number): Promise<Box[]> {
+    // Across all graphs, by time desc
+    return db.box.orderBy('time').reverse().limit(limit).toArray();
+  },
   async allByGraph(graph: string): Promise<Box[]> {
     return db.box.where('graph').equals(graph).toArray();
   },

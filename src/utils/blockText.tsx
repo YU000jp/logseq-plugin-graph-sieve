@@ -1,5 +1,6 @@
 import React from 'react';
 import { normalizeTaskLines as normalizeTaskLinesUtil } from './text';
+import { stripLogbook, isForcedHiddenPropLine } from './content';
 import { useTranslation } from 'react-i18next';
 
 export interface BlockNode { content?: string; children?: BlockNode[]; }
@@ -44,21 +45,7 @@ const stripMarkdown = (s: string): string => {
   return out;
 };
 
-const stripLogbook = (s: string): string => {
-  const lines = s.split('\n');
-  const out: string[] = []; let skip = false;
-  for (const line of lines) {
-    if (!skip && /^\s*:LOGBOOK:\s*$/i.test(line)) { skip = true; continue; }
-    if (skip) { if (/^\s*:END:\s*$/i.test(line)) skip = false; continue; }
-    out.push(line);
-  }
-  return out.join('\n');
-};
-
-const isForcedHiddenPropLine = (line: string, alwaysHideKeys: string[]) => {
-  if (!alwaysHideKeys.length) return false; if (!line.includes('::')) return false;
-  const [k] = line.split('::'); if (!k) return false; return alwaysHideKeys.includes(k.trim().toLowerCase());
-};
+// moved to utils/content.ts
 
 export function walkBlocks(blocks: BlockNode[], opts: BlockTextOptions, depth: number, emit: LineEmit) {
   const { hideProperties, hideReferences, alwaysHideKeys, folderMode, removeStrings, hideQueries, firstLineOnly } = opts;

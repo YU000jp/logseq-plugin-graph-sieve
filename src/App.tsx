@@ -3,28 +3,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 // import { BlockEntity } from '@logseq/libs/dist/LSPlugin.user';
 import { useTranslation } from "react-i18next";
 import i18n from "i18next";
-import { db, Box } from './db';
+import { Box } from './db';
 import './App.css'
 import { useUiTypography } from './hooks/useUiTypography';
 import { useAutoScrollActiveTab } from './hooks/useAutoScrollActiveTab';
 import { useTileGridMeasure } from './hooks/useTileGridMeasure';
-import { PlainTextView, RawCustomView, outlineTextFromBlocks, flattenBlocksToText, blocksToPlainText } from './utils/blockText';
+import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
+// block text utilities are now used inside PreviewPane; no direct use here
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Button, IconButton, InputAdornment, TextField, Switch, FormControlLabel, Tooltip, Chip, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
-import { Clear, ContentCopy } from '@mui/icons-material'; // ContentCopy still used for copy-content button
+import { Clear } from '@mui/icons-material';
 import SettingsIcon from '@mui/icons-material/Settings';
-import ClearAllIcon from '@mui/icons-material/ClearAll';
-import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
-import Inventory2Icon from '@mui/icons-material/Inventory2';
-import StarBorderIcon from '@mui/icons-material/StarBorder';
-import StarIcon from '@mui/icons-material/Star';
-import { encodeLogseqFileName, getLastUpdatedTime, getSummary, getSummaryFromRawText, parseOperation, sleep, decodeLogseqFileName } from './utils';
-import { normalizeTaskLines as normalizeTaskLinesUtil, removeMacroTokens as removeMacroTokensUtil } from './utils/text';
+import { encodeLogseqFileName, getSummary, getSummaryFromRawText, parseOperation, decodeLogseqFileName } from './utils';
+import { getPageBlocksTreeSafe } from './services/queryService';
+import { rebuildDatabase } from './services/rebuildService';
 import { boxService } from './services/boxService';
-import { queryPagesBasic, getPageBlocksTreeSafe, PageTuple } from './services/queryService';
+// query services are used within rebuildService
 import { getString, setString, getBoolean, setBoolean, getNumber, setNumber, remove as lsRemove } from './utils/storage';
 import type { MarkdownOrOrg, FileChanges } from './types';
 import BoxCard from './components/BoxCard';
+import { displayTitle as displayTitleUtil, journalDayWeek as journalDayWeekUtil } from './utils/journal';
+import PreviewTabs from './components/PreviewTabs';
+import PreviewPane from './components/PreviewPane';
 
 const dirHandles: { [graphName: string]: FileSystemDirectoryHandle } = {};
 
@@ -62,6 +62,9 @@ function App() {
   const resetUiFont = () => { setUiFontSize(13); setUiFontFamily(''); setUiLineHeight(1.5); setUiFontWeight(400); };
   const [preferredFormat, setPreferredFormat] = useState<MarkdownOrOrg>('markdown');
   const [loading, setLoading] = useState<boolean>(true);
+  // カード再構築中ロック用
+  const [cardsUpdating, setCardsUpdating] = useState<boolean>(false);
+  const rebuildTokenRef = useRef<number>(0);
   const [selectedBox, setSelectedBox] = useState<number>(0);
   // 選択カード参照 (キーボードハンドラ内で最新 index を参照するため)
   const selectedBoxRef = useRef<number>(0);
@@ -87,7 +90,6 @@ function App() {
   type Preview = { box: Box; blocks: any[] | null; loading: boolean; tab: PreviewTab; pinned: boolean; createdAt: number };
   const [previews, setPreviews] = useState<Preview[]>([]);
   const [activePreviewIndex, setActivePreviewIndex] = useState<number>(-1);
-  const [hoverCloseIndex, setHoverCloseIndex] = useState<number | null>(null);
   const [maxPreviewTabs, setMaxPreviewTabs] = useState<number>(() => getNumber('maxPreviewTabs', 10) || 10);
   useEffect(() => { setNumber('maxPreviewTabs', maxPreviewTabs); }, [maxPreviewTabs]);
   const [hideProperties, setHideProperties] = useState<boolean>(() => getBoolean('hideProperties', true));
@@ -130,17 +132,13 @@ function App() {
   // サイドバー設定表示トグル（Hide properties 等をまとめて隠す）
   const [showSidebarSettings, setShowSidebarSettings] = useState<boolean>(() => getBoolean('showSidebarSettings', false));
   useEffect(() => { setBoolean('showSidebarSettings', showSidebarSettings); }, [showSidebarSettings]);
-  // COPY CONTENT 対象ハイライト用
-  const [copyHover, setCopyHover] = useState<boolean>(false);
-  const sidebarBodyRef = useRef<HTMLDivElement | null>(null);
+  // removed copy-hover state: handled inside PreviewPane
 
   // (Create Page dialog removed)
 
   // collapsed プロパティ行除去は既に isForcedHiddenPropLine で対応 (key === 'collapsed') されているが、念のため本文再構築時にも除外
 
-  // 共通ユーティリティに委譲
-  const normalizeTaskLines = (text: string, enable: boolean) => normalizeTaskLinesUtil(text, enable);
-  const removeMacroTokens = (text: string, enable: boolean, alsoQueries: boolean) => removeMacroTokensUtil(text, enable, alsoQueries);
+  // normalize/copy/macro handling moved into PreviewPane
 
 
   // Ensure the active preview tab is visible in the global tabs scroll area
@@ -230,16 +228,22 @@ function App() {
     () => {
       if (graphMode === 'folder') {
         return (async () => {
-          const all = await db.box.where('graph').equals(currentGraph).sortBy('time');
-          all.reverse();
-          return all.slice(0, maxBoxNumber);
+          const all = await boxService.allByGraph(currentGraph);
+          // Sort desc by time and cap
+          return all.sort((a,b)=> b.time - a.time).slice(0, maxBoxNumber);
         })();
       }
-  if (detachedMode) return db.box.orderBy('time').reverse().limit(maxBoxNumber).toArray();
-  return boxService.recent(currentGraph, maxBoxNumber);
+      if (detachedMode) return boxService.recentAll(maxBoxNumber);
+      return boxService.recent(currentGraph, maxBoxNumber);
     },
     [currentGraph, maxBoxNumber, detachedMode, graphMode]
   );
+  
+  // モードやグラフ変更時に再構築をトリガー（ロック/キャンセルで競合回避）
+  useEffect(() => {
+    if (!currentGraph) return;
+    (async () => { try { await rebuildDB(); } catch { /* ignore */ } })();
+  }, [graphMode, currentGraph]);
   
   // スクロールに応じて追加ロード（動的測定した行高を利用）
   useTileGridMeasure({
@@ -253,22 +257,7 @@ function App() {
     setMaxBoxNumber,
   });
 
-  useEffect(() => {
-    const handleKeyDown = (e: { key: string; }) => {
-      switch (e.key) {
-        case "Escape":
-          logseq.hideMainUI({ restoreEditingCursor: true });
-          break;
-        default:
-          return;
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, []);
+  // Global ESC handling is included in keyboard navigation hook
 
   // computeRowHeight は useTileGridMeasure に含めた
 
@@ -291,203 +280,32 @@ function App() {
     });
   }, []);
 
-  const rebuildDB = useCallback(() => {
-    if (!currentGraph) return;
-
-  db.box.where('graph').equals(currentGraph).count().then(async _initialCount => {
-      try {
-        // Graph の最新ページ情報を取得して Box テーブルを更新
-        const { currentGraph: cg } = await logseq.App.getUserConfigs();
-        const isSynthetic = currentGraph.startsWith('fs_');
-        const targetGraph = isSynthetic ? currentGraph : cg;
-
-        // Synthetic (フォルダ直読み) グラフは Logseq DB クエリをスキップしてファイル列挙のみ
-        if (isSynthetic) {
-          if (!currentDirHandle) {
-            setLoading(false);
-            return;
-          }
-          try {
-            const existingSet = new Set<string>();
-            // 既存クリア済み想定だが念のため
-            await db.box.where('graph').equals(currentGraph).delete();
-            const processFile = async (dir: FileSystemDirectoryHandle, entryName: string) => {
-              try {
-                if (!/\.(md|org)$/i.test(entryName)) return;
-                const base = entryName.replace(/\.(md|org)$/i, '');
-                const pageName = decodeLogseqFileName(base);
-                if (!pageName) return;
-                // ジャーナル形式判定は表示段階で使用するためここでは除外しない
-                if (existingSet.has(pageName)) return;
-                const fileHandle = await dir.getFileHandle(entryName).catch(() => null);
-                if (!fileHandle) return;
-                const file = await fileHandle.getFile();
-                let text = '';
-                if (file.size > 0) text = await file.text();
-                const [summaryRaw, image] = getSummaryFromRawText(text);
-                const summary = summaryRaw.length === 0 ? [''] : summaryRaw;
-                await db.box.put({ graph: currentGraph, name: pageName, uuid: '', time: file.lastModified, summary, image });
-                existingSet.add(pageName);
-              } catch (e) {
-                console.warn('Synthetic import failed', entryName, e);
-              }
-            };
-            // ルート直下
-            // @ts-ignore
-            for await (const [entryName, entry] of (currentDirHandle as any).entries()) {
-              if (!entryName) continue;
-              if (entry.kind === 'file') {
-                await processFile(currentDirHandle, entryName);
-              } else if (entry.kind === 'directory' && entryName === 'journals') {
-                // journals フォルダ内を列挙
-                const journalsDir = await currentDirHandle.getDirectoryHandle('journals').catch(() => null);
-                if (journalsDir) {
-                  // @ts-ignore
-                  for await (const [jName, jEntry] of (journalsDir as any).entries()) {
-                    if (!jName || jEntry.kind !== 'file') continue;
-                    await processFile(journalsDir, jName);
-                  }
-                }
-              }
-            }
-            // pages の sibling として選択された root に journalsDirHandle がある場合 (openDirectoryPicker で取得)
-            if (journalsDirHandle) {
-              try {
-                // @ts-ignore
-                for await (const [jName, jEntry] of (journalsDirHandle as any).entries()) {
-                  if (!jName || jEntry.kind !== 'file') continue;
-                  await processFile(journalsDirHandle, jName);
-                }
-              } catch (e) {
-                console.warn('Root-level journals enumeration failed', e);
-              }
-            }
-          } catch (e) {
-            console.warn('Synthetic directory enumeration failed', e);
-          }
-          setLoading(false);
-          return; // ここで完了
-        }
-
-        // 1) 軽量クエリでページ一覧取得 (original-name/title, uuid, updated-at, journal?)
-  let tuples: PageTuple[] = await queryPagesBasic();
-  if (!tuples || tuples.length === 0) { setLoading(false); return; }
-
-  // 2) 重複排除（ジャーナル除外は UI 側で）
-        const seen = new Set<string>();
-        const filtered = tuples.filter(t => {
-          const [name] = t;
-          if (!name) return false;
-          if (seen.has(name)) return false; // 重複除去
-          seen.add(name);
-          return true;
-        });
-
-        // 3) バッチでサマリ取得 (以前と同様) – ただし updatedTime を優先 (dir handle があればファイル実際の更新日時を使う)
-        const promises: Promise<void>[] = [];
-        while (filtered.length > 0) {
-          const tuple = filtered.pop();
-          if (!tuple) break;
-          const [originalName, uuid, updatedAt] = tuple as PageTuple;
-          const promise = (async () => {
-            let updatedTime: number | undefined = 0;
-            if (currentDirHandle) {
-              updatedTime = await getLastUpdatedTime(encodeLogseqFileName(originalName), currentDirHandle!, preferredFormat);
-            } else {
-              if (originalName === 'Contents') return; // 不正確なためスキップ
-              updatedTime = updatedAt || 0;
-            }
-            if (!updatedTime) return;
-            const blocks = await getPageBlocksTreeSafe(uuid || originalName);
-            if (!blocks || blocks.length === 0) return;
-            const [summary, image] = getSummary(blocks);
-            if (summary.length > 0 && !(summary.length === 1 && summary[0] === '')) {
-           await db.box.put({
-             graph: targetGraph,
-                name: originalName,
-                uuid: uuid || '',
-                time: updatedTime,
-                summary,
-                image,
-              });
-            }
-          })();
-          promises.push(promise);
-
-          if (filtered.length === 0 || promises.length >= 100) {
-            await Promise.all(promises).catch(err => { console.error(err); });
-            promises.splice(0, promises.length);
-            await sleep(300); // 短め
-          }
-        }
-
-        // 4) 追加: pages フォルダ直読みで未登録ファイルを補完（常に実行）
-    if (currentDirHandle) {
-          try {
-      const existing = await db.box.where('graph').equals(currentGraph).toArray();
-            const existingSet = new Set(existing.map(b => b.name));
-            // @ts-ignore for-await support
-            const processFile = async (dir: FileSystemDirectoryHandle, entryName: string) => {
-              try {
-                if (!/\.(md|org)$/i.test(entryName)) return;
-                const base = entryName.replace(/\.(md|org)$/i, '');
-                const pageName = decodeLogseqFileName(base);
-                if (!pageName) return;
-                // const isJournalLike = /^(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/.test(pageName); // 取り込み時には未使用
-                if (existingSet.has(pageName)) return;
-                const fileHandle = await dir.getFileHandle(entryName).catch(() => null);
-                if (!fileHandle) return;
-                const file = await fileHandle.getFile();
-                let text = '';
-                if (file.size > 0) text = await file.text();
-                const [summaryRaw, image] = getSummaryFromRawText(text);
-                const summary = summaryRaw.length === 0 ? [''] : summaryRaw;
-                await db.box.put({ graph: currentGraph, name: pageName, uuid: '', time: file.lastModified, summary, image });
-                existingSet.add(pageName);
-              } catch (e) {
-                console.warn('Failed to import file entry', entryName, e);
-              }
-            };
-            // root entries + journals directory
-            // @ts-ignore
-            for await (const [entryName, entry] of (currentDirHandle as any).entries()) {
-              if (!entryName) continue;
-              if (entry.kind === 'file') {
-                await processFile(currentDirHandle, entryName);
-              } else if (entry.kind === 'directory' && entryName === 'journals') {
-                const journalsDir = await currentDirHandle.getDirectoryHandle('journals').catch(() => null);
-                if (journalsDir) {
-                  // @ts-ignore
-                  for await (const [jName, jEntry] of (journalsDir as any).entries()) {
-                    if (!jName || jEntry.kind !== 'file') continue;
-                    await processFile(journalsDir, jName);
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            console.warn('Directory enumeration failed', e);
-          }
-        }
-        setLoading(false);
-      } catch (e) {
-        console.error(e);
-        setLoading(false);
-      }
+  const rebuildDB = useCallback(async () => {
+    await rebuildDatabase({
+      currentGraph,
+      currentDirHandle,
+      journalsDirHandle,
+      preferredFormat,
+      setLoading,
+      setCardsUpdating,
+      rebuildTokenRef,
+      // 調整可能なバッチ設定（必要に応じて変更可）
+      batchSize: 100,
+      batchSleepMs: 300,
     });
-  }, [currentDirHandle, currentGraph, preferredFormat, excludeJournals]);
+  }, [currentGraph, currentDirHandle, journalsDirHandle, preferredFormat]);
 
   // Rebuild automatically when excludeJournals changes
   useEffect(() => {
     if (!currentGraph) return;
     (async () => {
       setLoading(true);
-  await boxService.removeByGraph(currentGraph);
-      rebuildDB();
+      await boxService.removeByGraph(currentGraph);
+      await rebuildDB();
     })();
   }, [excludeJournals, currentGraph, rebuildDB]);
 
-  useEffect(() => rebuildDB(), [rebuildDB]);
+  useEffect(() => { void rebuildDB(); }, [rebuildDB]);
 
   useEffect(() => {
     const onFileChanged = async (changes: FileChanges) => {
@@ -545,134 +363,7 @@ function App() {
     }
   }, [currentGraph]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: { key: string; shiftKey: boolean; altKey?: boolean; }) => {
-      if (loading) return;
-      // 入力系 (typing) のみ抑止。sidebar での選択やボタンフォーカス時も矢印ナビ有効化
-      const activeEl = document.activeElement as HTMLElement | null;
-      const isTyping = !!activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
-      if (isTyping) return;
-      const tile = document.getElementById('tile');
-      if (!tile?.hasChildNodes()) {
-        return;
-      }
-      const tileWidth = tile!.clientWidth - 24 * 2; // padding is 24px. clientWidth does not include scrollbar width.
-      const tileHeight = tile!.offsetHeight;
-      const tileTop = tile!.offsetTop;
-      // margin-right is auto
-      // margin-left must not be auto to avoid the layout becoming too dense
-      const boxMarginRight = parseInt(window.getComputedStyle((tile!.children[0] as HTMLElement)).getPropertyValue('margin-right'));
-      const boxWidth = (tile!.children[0] as HTMLElement).offsetWidth + 10 + boxMarginRight; // margin-left is 10px
-      const boxHeight = (tile!.children[0] as HTMLElement).offsetHeight + 10 * 2; // margin is 10px
-
-      const cols = Math.floor(tileWidth / boxWidth);
-      const rows = Math.floor(tileHeight / boxHeight);
-      if (e.key === 'ArrowUp') {
-        tileRef.current?.focus(); // To un-focus tag input field.
-        setSelectedBox(selectedBox => {
-          const newIndex = selectedBox - cols;
-          if (newIndex < 0) {
-            return selectedBox;
-          }
-
-          const boxTop = (tile!.children[selectedBox] as HTMLElement).offsetTop - tileTop - 10 - tile.scrollTop; // margin is 10px;
-          if (Math.floor(boxTop / boxHeight) <= 1) {
-            tile.scrollBy(0, -boxHeight);
-          }
-          return newIndex;
-        });
-      }
-      else if (e.key === 'ArrowDown') {
-        tileRef.current?.focus(); // To un-focus tag input field.
-        setSelectedBox(selectedBox => {
-          const newIndex = selectedBox + cols;
-          if (newIndex >= tile!.childElementCount) {
-            return selectedBox;
-          }
-          const boxTop = (tile!.children[selectedBox] as HTMLElement).offsetTop - tileTop - 10 - tile.scrollTop; // margin is 10px;
-          if (Math.floor(boxTop / boxHeight) >= rows - 1) {
-            tile.scrollBy(0, boxHeight);
-          }
-
-          return newIndex;
-        });
-      }
-      else if (e.key === 'ArrowRight') {
-        tileRef.current?.focus(); // To un-focus tag input field.
-        setSelectedBox(selectedBox => {
-          const newIndex = selectedBox + 1;
-          if (newIndex >= tile!.childElementCount) {
-            return selectedBox;
-          }
-          if (Math.floor(selectedBox / cols) !== Math.floor(newIndex / cols)) {
-            const boxTop = (tile!.children[selectedBox] as HTMLElement).offsetTop - tileTop - 10 - tile.scrollTop; // margin is 10px;
-            if (Math.floor(boxTop / boxHeight) >= rows - 1) {
-              tile.scrollBy(0, boxHeight);
-            }
-          }
-          return newIndex;
-        });
-      }
-      else if (e.key === 'ArrowLeft') {
-        tileRef.current?.focus(); // To un-focus tag input field.
-        setSelectedBox(selectedBox => {
-          const newIndex = selectedBox - 1;
-          if (newIndex < 0) {
-            return selectedBox;
-          }
-          if (Math.floor(selectedBox / cols) !== Math.floor(newIndex / cols)) {
-            const boxTop = (tile!.children[selectedBox] as HTMLElement).offsetTop - tileTop - 10 - tile.scrollTop; // margin is 10px;
-            if (Math.floor(boxTop / boxHeight) <= 1) {
-              tile.scrollBy(0, -boxHeight);
-            }
-          }
-          return newIndex;
-        });
-      }
-      else if (e.key === 'Enter') {
-        // Enter: open (or duplicate if already open). Shift+Enter: open directly in Logseq main UI.
-        const idx = selectedBoxRef.current;
-        if (!cardboxes || idx < 0) return;
-        // メイン一覧に表示されている配列から取得 (ジャーナル除外後)
-        const card = visibleMainBoxes[idx];
-        if (!card) return;
-        if (e.shiftKey) {
-          logseq.App.pushState('page', { name: card.name });
-          logseq.hideMainUI({ restoreEditingCursor: true });
-          return;
-        }
-        if (e.altKey) {
-          const dup = { ...card, uuid: (card.uuid || card.name) + ':' + Date.now() } as any;
-          void openInSidebar(dup);
-        } else {
-          void openInSidebar(card);
-        }
-      }
-      else {
-        switch (e.key) {
-          case "Shift":
-          case "Control":
-          case "Alt":
-          case "Meta":
-          case "Tab":
-            return;
-        }
-        // 文字入力中（どこかの入力要素にフォーカスがある）ならフォーカスを奪わない
-        const active = document.activeElement as HTMLElement | null;
-        const isTyping = !!active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
-        if (isTyping) {
-          return;
-        }
-  // 旧タグ入力フォーカス削除: 今後は何もしない（将来: 検索フィールドへフォーカス予定）
-      }
-
-    };
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [loading, cardboxes]);
+  // キーボードナビゲーションのフックは、依存（visibleMainBoxes/openInSidebar）定義以降に呼ぶ
 
   const openInSidebar = useCallback(async (box: Box) => {
     // Detached モードで別グラフの場合はファイル RAW から生成
@@ -1057,10 +748,7 @@ function App() {
           setSubpagesDeeper(false);
           return;
         }
-        const items = await db.box
-          .where('graph').equals(currentGraph)
-          .and(b => b.name.startsWith(name + '/'))
-          .toArray();
+  const items = (await boxService.allByGraph(currentGraph)).filter(b => b.name.startsWith(name + '/'));
         const prefix = name + '/';
         const oneLevel = items.filter(b => {
           const rest = b.name.slice(prefix.length);
@@ -1088,11 +776,7 @@ function App() {
       const name = sidebarBox?.name;
       if (!currentGraph) { setFavorites([]); return; }
       try {
-        const allFav = await db.box
-          .where('graph').equals(currentGraph)
-          .and(b => !!b.favorite)
-          .reverse()
-          .sortBy('time');
+  const allFav = await boxService.favoritesByGraph(currentGraph);
         if (!name) { setFavorites(allFav.slice(0, 50)); return; }
         const prefix = name + '/';
         const children = allFav.filter(b => b.name.startsWith(prefix));
@@ -1108,11 +792,7 @@ function App() {
     const loadLeftFav = async () => {
       if (!currentGraph) { setLeftFavorites([]); return; }
       try {
-        const favs = await db.box
-          .where('graph').equals(currentGraph)
-          .and(b => !!b.favorite)
-          .reverse()
-          .sortBy('time');
+  const favs = await boxService.favoritesByGraph(currentGraph);
         setLeftFavorites(favs.slice(0, 100));
       } catch { setLeftFavorites([]); }
     };
@@ -1153,7 +833,7 @@ function App() {
     const hash = (acc >>> 0).toString(36).slice(0,8);
     const syntheticId = `fs_${hash}`;
     dirHandles[syntheticId] = pagesHandle!;
-    await db.box.where('graph').equals(syntheticId).delete();
+  await boxService.removeByGraph(syntheticId);
     setCurrentGraph(syntheticId);
   setCurrentDirHandle(pagesHandle!);
     setGraphMode('folder');
@@ -1218,45 +898,8 @@ function App() {
     }
   }, [currentGraph]);
 
-  const formatDateByPattern = (dt: Date, pattern: string) => {
-    // シンプル置換 (yyyy, MM, dd)
-    const yyyy = String(dt.getFullYear());
-    const MM = String(dt.getMonth()+1).padStart(2,'0');
-    const dd = String(dt.getDate()).padStart(2,'0');
-    return pattern.replace(/yyyy/g, yyyy).replace(/MM/g, MM).replace(/dd/g, dd);
-  };
-
-  const displayTitle = (name: string) => {
-    const decoded = name.replace(/%2F/gi, '/');
-    if (graphMode === 'folder') {
-      const noExt = decoded.replace(/\.(md|org)$/i, '');
-      const journalMatch = noExt.match(/^(?:journals\/)?(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
-      if (journalMatch) {
-        const [, y, m, d] = journalMatch;
-        try {
-          const dt = new Date(Number(y), Number(m) - 1, Number(d));
-      return formatDateByPattern(dt, journalDatePattern);
-        } catch {
-          return `${y}/${m}/${d}`;
-        }
-      }
-    }
-    return decoded;
-  };
-
-  // Journal カード用: 日 + 曜日（ロケール）表示
-  const journalDayWeek = (name: string) => {
-    const decoded = name.replace(/%2F/gi,'/').replace(/^journals\//,'').replace(/\.(md|org)$/i,'');
-    const m = decoded.match(/^(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
-    if (!m) return displayTitle(name);
-    const [, y, mo, d] = m;
-    try {
-      const dt = new Date(Number(y), Number(mo)-1, Number(d));
-      const day = new Intl.DateTimeFormat(undefined, { day: 'numeric' }).format(dt);
-      const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(dt);
-      return `${day} ${weekday}`; // 例: 13 Tue (ロケールにより Tue / 火 など)
-    } catch { return displayTitle(name); }
-  };
+  const displayTitle = (name: string) => displayTitleUtil(name, graphMode, journalDatePattern);
+  const journalDayWeek = (name: string) => (isJournalName(name) ? journalDayWeekUtil(name) : displayTitle(name));
 
   // toJournalPageNameIfDate は BlockList 内で使用するため、関数自体はモジュールスコープ版を下部に定義。
 
@@ -1411,6 +1054,16 @@ function App() {
     />
   ));
 
+  // Keyboard navigation over the tile grid
+  useKeyboardNavigation({
+    loading: loading || cardsUpdating,
+    tileRef,
+    selectedBoxRef,
+    setSelectedBox,
+    visibleMainBoxes: visibleMainBoxes as any,
+    openInSidebar: openInSidebar as any,
+  });
+
   // Open a page by name in a new/activated preview tab
   const openPageInPreviewByName = useCallback(async (name: string) => {
     try {
@@ -1444,6 +1097,13 @@ function App() {
   // (removed duplicate visibleMainBoxes / misplaced toggle)
   return (
     <>
+      {cardsUpdating && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.05)', zIndex: 9999, cursor: 'progress' }}>
+          <div style={{ position:'absolute', top:'12px', right:'12px', padding:'6px 10px', background:'#fff', border:'1px solid #ddd', borderRadius:6, boxShadow:'0 2px 8px rgba(0,0,0,0.06)', fontSize:12 }}>
+            Updating cards...
+          </div>
+        </div>
+      )}
       <div className='control'>
         <div className='control-left'>
           <div className='loading' style={{ display: loading ? 'block' : 'none' }}>{t('loading')}</div>
@@ -1479,49 +1139,18 @@ function App() {
           <Clear className='clear-btn' onClick={() => logseq.hideMainUI({ restoreEditingCursor: true })} style={{ cursor: 'pointer', float: 'right', marginTop: 10, marginRight: 24 }} />
         </div>
   </div>
-  <div className={'global-tabs-row' + (previews.length===0 ? ' empty':'')}>
-        <div className='tabs-actions'>
-          <Tooltip title={t('close-all-tabs') || 'Close all tabs'}>
-            <IconButton size='small' onClick={() => { setPreviews([]); setActivePreviewIndex(-1); }} aria-label='close-all-tabs'><ClearAllIcon fontSize='small' /></IconButton>
-          </Tooltip>
-        </div>
-        <div className='tabs-spacer' />
-        <div className={'preview-tabs' + (previews.length===0 ? ' empty':'')}>
-          {previews.length===0 && <span style={{padding:'2px 4px'}}>No tabs</span>}
-          {previews.map((p, idx) => {
-            const active = idx === activePreviewIndex;
-            return (
-              <span key={p.box.uuid || p.box.name + ':' + idx} className={'preview-tab' + (active ? ' active' : '') + (p.pinned ? ' pinned' : '')}
-                onMouseEnter={() => setHoverCloseIndex(idx)}
-                onMouseLeave={() => setHoverCloseIndex(null)}
-              >
-                <Button size='small' variant={active ? 'contained' : 'text'} onClick={() => setActivePreviewIndex(idx)} title={displayTitle(p.box.name)} className='preview-tab-btn'>
-                  {/* Pin marker */}
-                  <span
-                    className={'tab-marker pin-marker' + (p.pinned ? ' pinned' : '')}
-                    onClick={(e) => { e.stopPropagation(); setPreviews(prev => prev.map((pp, i) => i === idx ? { ...pp, pinned: !pp.pinned } : pp)); }}
-                    title={p.pinned ? 'Unpin' : 'Pin'}
-                  >
-                    {p.pinned ? '📌' : '•'}
-                  </span>
-                  <span className='tab-title-ellipsis'>{displayTitle(p.box.name)}</span>
-                  {/* Close marker (shows only on hover) */}
-                  <span
-                    className={'tab-marker close-marker' + (hoverCloseIndex === idx ? ' visible' : '')}
-                    onClick={(e) => { e.stopPropagation(); closePreviewAt(idx); }}
-                    title={t('close')}
-                  >
-                    ×
-                  </span>
-                </Button>
-              </span>
-            );
-          })}
-          <div className='max-tabs-setting'>
-            <TextField size='small' type='number' label='Max' variant='filled' value={maxPreviewTabs} onClick={e => e.stopPropagation()} onChange={e => { const n = parseInt(e.target.value, 10); if (!isNaN(n) && n > 0) setMaxPreviewTabs(n); }} inputProps={{ min: 1, style: { width: 60, padding: 2 } }} style={{ marginLeft: 8 }} />
-          </div>
-        </div>
-  </div>
+  <PreviewTabs
+    previews={previews as any}
+    activeIndex={activePreviewIndex}
+    onActivate={setActivePreviewIndex}
+    onTogglePin={(idx) => setPreviews(prev => prev.map((pp, i) => i === idx ? { ...pp, pinned: !pp.pinned } : pp))}
+    onClose={closePreviewAt}
+    onCloseAll={() => { setPreviews([]); setActivePreviewIndex(-1); }}
+    maxPreviewTabs={maxPreviewTabs}
+    onChangeMax={(n) => setMaxPreviewTabs(n)}
+    displayTitle={displayTitle}
+    t={t}
+  />
   <div className='content'>
         <Dialog open={globalSettingsOpen} onClose={()=> setGlobalSettingsOpen(false)} maxWidth='sm' fullWidth>
           <DialogTitle style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
@@ -1594,170 +1223,53 @@ function App() {
         </div>
         <aside id='sidebar'>
           {sidebarBox ? (
-            <div className={'sidebar-inner' + (sidebarBox.archived ? ' archived' : '')}>
-              <div className='sidebar-header'>
-                <div className='sidebar-title' title={displayTitle(sidebarBox.name)}>{(() => {
-                  const rawName = sidebarBox.name || '';
-                  // 展開後スラッシュセグメント (journals は 1 セグメントなのでジャーナル整形後を上書き)
-                  let segments = rawName.replace(/%2F/gi,'/').split('/').filter(Boolean);
-                  if (segments.length === 1) {
-                    const dt = displayTitle(rawName);
-                    if (dt !== rawName) {
-                      // ジャーナル日付 YYYY/MM/DD を階層分割
-                      if (/^\d{4}\/\d{2}\/\d{2}$/.test(dt)) {
-                        const [y,m,d] = dt.split('/');
-                        segments = [y,m,d];
-                      } else {
-                        segments[0] = dt;
-                      }
-                    }
-                  } else {
-                    // 各セグメント個別に displayTitle を適用（必要なら）
-                    for (let i=0;i<segments.length;i++) {
-                      const maybe = displayTitle(segments.slice(0,i+1).join('/')); // ネストに応じた判定
-                      if (maybe.includes('/') && maybe.split('/').length===3) segments[i] = maybe.split('/').slice(-1)[0];
-                    }
-                  }
-                  // rawSegments: ジャーナルは1セグメントのまま (クリックで元ページ開くため)
-                  const rawSegmentsBase = rawName.split('/').filter(Boolean);
-                  const isJournalSingle = /^\d{4}_[0-1]\d_[0-3]\d$/.test(rawSegmentsBase[0]) && segments.length===3;
-                  const rawSegments = isJournalSingle ? [rawSegmentsBase[0]] : rawSegmentsBase;
-                  // 仮想パス: ジャーナル日付 (year, year/month, year/month/day)
-                  const journalVirtualPaths = isJournalSingle ? (() => {
-                    const [y,m,d] = segments; // segments = [YYYY, MM, DD]
-                    return [y, `${y}/${m}`, `${y}/${m}/${d}`];
-                  })() : [];
-                  const crumbs: React.ReactNode[] = [];
-                  for (let i = 0; i < segments.length; i++) {
-                    const label = segments[i];
-                    const targetName = isJournalSingle ? journalVirtualPaths[i] : rawSegments.slice(0, i + 1).join('/');
-                    const displayFull = isJournalSingle ? journalVirtualPaths[i] : segments.slice(0, i + 1).join('/');
-                    crumbs.push(<a key={`crumb-${i}`} href='#' className='crumb' onClick={(e) => { e.preventDefault(); (e as React.MouseEvent).shiftKey ? (logseq.App.pushState('page', { name: targetName }), logseq.hideMainUI({ restoreEditingCursor: true })) : void openPageInPreviewByName(targetName); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openPageInPreviewByName(targetName); } }} tabIndex={0} title={displayFull}><span className='crumb-text'>{label}</span></a>);
-                    if (i < segments.length - 1) crumbs.push(<span key={`sep-${i}`} className='sep'> / </span>);
-                  }
-                  return <div className='breadcrumb'>{crumbs}</div>;
-                })()}</div>
-                <div className='sidebar-controls'>
-                  <Tooltip title={sidebarBox.favorite ? (t('unfavorite') || 'Unfavorite') : (t('favorite') || 'Favorite')}><IconButton size='small' onClick={() => toggleFavorite(sidebarBox, !sidebarBox.favorite)} aria-label='favorite-toggle'>{sidebarBox.favorite ? <StarIcon fontSize='small' style={{ color: '#f5b301' }} /> : <StarBorderIcon fontSize='small' />}</IconButton></Tooltip>
-                  <Tooltip title={sidebarBox.archived ? 'Unarchive' : 'Archive'}><IconButton size='small' onClick={() => toggleArchive(sidebarBox, !sidebarBox.archived)} aria-label='archive-toggle'>{sidebarBox.archived ? <Inventory2Icon fontSize='small' /> : <Inventory2OutlinedIcon fontSize='small' />}</IconButton></Tooltip>
-                </div>
-              </div>
-              <div className='sidebar-nav'>
-                <div className='sidebar-row sidebar-row--tabs'>
-                  <div className='sidebar-tabs'>
-                    <Button size='small' variant={sidebarTab === 'content' ? 'contained' : 'text'} onClick={() => setActiveTab('content')}>{t('tab-content')}</Button>
-                    <Button size='small' variant={sidebarTab === 'nomark' ? 'contained' : 'text'} onClick={() => setActiveTab('nomark')}>{t('tab-no-markdown')}</Button>
-                    <Button size='small' variant={sidebarTab === 'outline' ? 'contained' : 'text'} onClick={() => setActiveTab('outline')}>{t('tab-raw')}</Button>
-                    {/* rawFullMode トグル削除 */}
-                  </div>
-                  <div className='spacer' />
-                  <Tooltip title={(t('settings') as string) || 'Settings'}><IconButton size='small' onClick={() => setShowSidebarSettings(s => !s)} aria-label='toggle-settings'><SettingsIcon fontSize='small' color={showSidebarSettings ? 'primary' : 'inherit'} /></IconButton></Tooltip>
-                </div>
-                {showSidebarSettings && <div className='sidebar-row sidebar-row--filters'>
-                  {/* NO MARKDOWN では hideProperties 以外を無効化 */}
-                  <FormControlLabel className='prop-filter' disabled={false} control={<Switch size='small' checked={hideProperties} onChange={(_, v) => setHideProperties(v)} />} label={t('toggle-hide-properties')} />
-                  {/* Hide refs/embeds トグル廃止: 常に非表示 */}
-                  <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={stripPageBrackets} onChange={(_, v) => setStripPageBrackets(v)} />} label={t('toggle-strip-page-brackets') || 'Strip [[ ]]'} />
-                  <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={!hidePageRefs} onChange={(_, v) => setHidePageRefs(!v)} />} label={t('toggle-page-links') || t('toggle-hide-page-refs') || 'Page links'} />
-                  <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={hideQueries} onChange={(_, v) => setHideQueries(v)} />} label={t('toggle-hide-queries') || 'Hide queries'} />
-                  <Tooltip title={t('toggle-remove-macros-help') || 'Remove {{macro ...}} constructs (except queries unless hidden)'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={removeMacros} onChange={(_, v) => setRemoveMacros(v)} />} label={t('toggle-remove-macros') || 'Remove macros'} /></span></Tooltip>
-                  <Tooltip title={t('toggle-normalize-tasks-help') || 'Convert TODO/DONE etc. to Markdown checkboxes'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={normalizeTasks} onChange={(_, v) => setNormalizeTasks(v)} />} label={t('toggle-normalize-tasks') || 'Normalize tasks'} /></span></Tooltip>
-                </div>}
-                {showSidebarSettings && <div className='sidebar-row sidebar-row--options'>
-                  <TextField size='small' label={t('always-hide-props')} placeholder={t('always-hide-props-ph')} value={alwaysHidePropKeys} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { const v = e.target.value; setAlwaysHidePropKeys(v); setString('alwaysHideProps', v); }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px' }} />
-                  <TextField size='small' label={t('remove-strings')} placeholder={t('remove-strings-ph')} value={removeStringsRaw} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { setRemoveStringsRaw(e.target.value); }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px', marginLeft: '8px' }} />
-                </div>}
-                <div className='sidebar-row sidebar-row--actions'>
-                  <div className='sidebar-actions'>
-                    <Button size='small' variant='outlined' startIcon={<ContentCopy fontSize='small' />} disabled={(sidebarTab !== 'content' && sidebarTab !== 'nomark' && sidebarTab !== 'outline' && sidebarTab !== 'raw-custom') || sidebarLoading || !(sidebarBlocks && sidebarBlocks.length > 0)} onMouseEnter={() => setCopyHover(true)} onMouseLeave={() => setCopyHover(false)} onFocus={() => setCopyHover(true)} onBlur={() => setCopyHover(false)} onClick={async () => {
-                      if (!sidebarBlocks) return;
-                      let text: string;
-                      if (sidebarTab === 'nomark') {
-                        text = blocksToPlainText(sidebarBlocks as BlockNode[], hideProperties, true, 0, alwaysHideKeys, currentGraph.startsWith('fs_'), removeStrings);
-                      } else if (sidebarTab === 'outline') {
-                        text = outlineTextFromBlocks((sidebarBlocks || []) as BlockNode[], { hideProperties, hideReferences: true, alwaysHideKeys, hideQueries, removeStrings, stripPageBrackets });
-                      } else { // content
-                        text = flattenBlocksToText(sidebarBlocks as BlockNode[], hideProperties, true, 0, alwaysHideKeys, currentGraph.startsWith('fs_'), removeStrings);
-                      }
-                      if (sidebarTab !== 'outline') {
-                        text = text.split('\n').filter(l => l.trim().length > 0).join('\n');
-                        if (stripPageBrackets) {
-                          text = text.replace(/\[\[([^\]]+)\]\]/g,'$1')
-                            .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
-                            .replace(/\[\[([^\]]+)\]\[([^\]]*)\]\]/g, (_, u, txt) => txt || u);
-                        }
-                        if (hideQueries) text = text.replace(/\{\{\s*query[^}]*\}\}/ig,'');
-                        if (removeMacros) text = removeMacroTokens(text, true, hideQueries);
-                        if (removeStrings.length) {
-                          for (const rs of removeStrings) if (rs) text = text.split(rs).join('');
-                        }
-                        if (normalizeTasks) text = normalizeTaskLines(text, true);
-                        text = text.replace(/\n{2,}/g,'\n').replace(/ +/g,' ').trim();
-                      } else {
-                        if (normalizeTasks) text = normalizeTaskLines(text, true);
-                        text = text.replace(/\n{2,}/g,'\n').replace(/ +/g,' ').trim();
-                      }
-                      try {
-                        if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
-                        else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
-                        logseq.UI.showMsg(t('copied'));
-                      } catch (e) { console.error(e); logseq.UI.showMsg(t('copy-failed')); }
-                    }}>{t('copy-content')}</Button>
-                    {/* Create Page button removed */}
-                    {(!detachedMode && sidebarBox && sidebarBox.graph === currentGraph) && <Button size='small' variant='outlined' onClick={() => { if (!sidebarBox) return; logseq.App.pushState('page', { name: sidebarBox.name }); logseq.hideMainUI({ restoreEditingCursor: true }); }}>{t('open-in-logseq')}</Button>}
-                    <IconButton size='small' onClick={closeActivePreview} title={t('close')}><Clear fontSize='small' /></IconButton>
-                  </div>
-                </div>
-              </div>
-              <div ref={sidebarBodyRef} className='sidebar-body' tabIndex={0}>
-                {(() => {
-                  // 動的比率計算
-                  const isJournalPreview = isJournalName(sidebarBox.name);
-                  let subpagesPresent = subpages && subpages.length > 0;
-                  const subSet = new Set(subpages.map(s => `${s.graph}::${s.name}`));
-                  const filteredRelated = related.filter(r => !subSet.has(`${r.graph}::${r.name}`));
-                  let relatedPresent = filteredRelated.length > 0; // Journal の場合は journalRelated も非表示
-                  if (isJournalPreview) { subpagesPresent = false; relatedPresent = false; }
-                  let mainFlex = 1, subFlex = 0, relFlex = 0;
-                  if (!subpagesPresent && !relatedPresent) {
-                    mainFlex = 1; // 100%
-                  } else if (subpagesPresent && relatedPresent) {
-                    mainFlex = 8; subFlex = 1; relFlex = 1; // base
-                    if (hoveredSidePane === 'sub') { mainFlex = 6; subFlex = 3; relFlex = 1; }
-                    else if (hoveredSidePane === 'rel') { mainFlex = 6; subFlex = 1; relFlex = 3; }
-                  } else if (subpagesPresent) {
-                    mainFlex = hoveredSidePane === 'sub' ? 6 : 8; subFlex = hoveredSidePane === 'sub' ? 3 : 2;
-                  } else if (relatedPresent) {
-                    mainFlex = hoveredSidePane === 'rel' ? 6 : 8; relFlex = hoveredSidePane === 'rel' ? 3 : 2;
-                  }
-                  return (
-                    <>
-                      <div className={'sidebar-pane sidebar-pane-main'} style={{ flex: mainFlex }}>
-                        <div className={'sidebar-main-text' + (copyHover ? ' copy-target-hover' : '')}>
-                          {sidebarLoading ? <div className='sidebar-loading'>{t('loading-content')}</div> : sidebarTab === 'content' ? (() => {
-                            const has = hasRenderableContent((sidebarBlocks || []) as BlockNode[], hideProperties, true, alwaysHideKeys, hidePageRefs, hideQueries, removeStrings);
-                            return (<>{has ? <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={currentGraph.startsWith('fs_')} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} journalLinkPattern={journalLinkPattern} /> : <div className='sidebar-empty'>{t('no-content')}</div>}</>);
-                          })() : sidebarTab === 'nomark' ? <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={currentGraph.startsWith('fs_')} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} /> : sidebarTab === 'outline' ? <RawCustomView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} folderMode={currentGraph.startsWith('fs_')} normalizeTasks={normalizeTasks} /> : null}
-                        </div>
-                      </div>
-            {subpagesPresent && <div className='sidebar-pane sidebar-pane-subpages' style={{ flex: subFlex }} onMouseEnter={() => setHoveredSidePane('sub')} onMouseLeave={() => setHoveredSidePane(p => p === 'sub' ? null : p)}>
-                        <div className='sidebar-subpages'>
-                          <div className='subpages-title'>{t('subpages')}</div>
-              {subpagesDeeper && <div className='subpages-notice'>{t('subpages-deeper-notice')}</div>}
-                          <div className='cards-grid'>{subpages.map(b => (<BoxCard key={`sub-${b.graph}-${b.name}`} box={b} selected={false} currentGraph={currentGraph} preferredDateFormat={preferredDateFormat} onClick={boxOnClick} displayName={displayTitle(b.name)} />))}</div>
-                        </div>
-                      </div>}
-            {relatedPresent && <div className='sidebar-pane sidebar-pane-related' style={{ flex: relFlex }} onMouseEnter={() => setHoveredSidePane('rel')} onMouseLeave={() => setHoveredSidePane(p => p === 'rel' ? null : p)}>
-                        <div className='sidebar-subpages related-subpages'>
-                          <div className='subpages-title'>{t('related') || 'Related'}</div>
-              {filteredRelated.length === 0 ? <div className='sidebar-empty'>{t('no-content')}</div> : <div className='cards-grid'>{filteredRelated.map(b => (<BoxCard key={`rel-${b.graph}-${b.name}`} box={b} selected={false} currentGraph={currentGraph} preferredDateFormat={preferredDateFormat} onClick={boxOnClick} displayName={displayTitle(b.name)} />))}</div>}
-                        </div>
-                      </div>}
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
+            <PreviewPane
+              box={sidebarBox}
+              blocks={sidebarBlocks}
+              loading={sidebarLoading}
+              tab={sidebarTab}
+              onSetTab={(tab) => setActiveTab(tab)}
+              displayTitle={displayTitle}
+              onToggleFavorite={toggleFavorite}
+              onToggleArchive={toggleArchive}
+              onOpenPage={openPageInPreviewByName}
+              onCloseActive={closeActivePreview}
+
+              showSettings={showSidebarSettings}
+              onToggleSettings={() => setShowSidebarSettings(s => !s)}
+              hideProperties={hideProperties}
+              setHideProperties={setHideProperties}
+              stripPageBrackets={stripPageBrackets}
+              setStripPageBrackets={setStripPageBrackets}
+              hidePageRefs={hidePageRefs}
+              setHidePageRefs={setHidePageRefs}
+              hideQueries={hideQueries}
+              setHideQueries={setHideQueries}
+              removeMacros={removeMacros}
+              setRemoveMacros={setRemoveMacros}
+              normalizeTasks={normalizeTasks}
+              setNormalizeTasks={setNormalizeTasks}
+              alwaysHidePropKeys={alwaysHidePropKeys}
+              setAlwaysHidePropKeys={setAlwaysHidePropKeys}
+              removeStringsRaw={removeStringsRaw}
+              setRemoveStringsRaw={setRemoveStringsRaw}
+              alwaysHideKeys={alwaysHideKeys}
+              removeStrings={removeStrings}
+
+              currentGraph={currentGraph}
+              preferredDateFormat={preferredDateFormat}
+              assetsDirHandle={assetsDirHandle}
+              journalLinkPattern={journalLinkPattern}
+              detachedMode={detachedMode}
+
+              subpages={subpages}
+              subpagesDeeper={subpagesDeeper}
+              related={related}
+              onClickBox={(b) => boxOnClick(b as any, { nativeEvent: {} } as any)}
+
+              hoveredSidePane={hoveredSidePane}
+              setHoveredSidePane={setHoveredSidePane}
+            />
           ) : <div className='sidebar-placeholder'>{t('sidebar-placeholder')}</div>}
         </aside>
       </div>
@@ -1770,561 +1282,3 @@ function App() {
 
 export default App
 
-// Simple recursive block renderer for sidebar
-type BlockNode = {
-  content?: string;
-  children?: BlockNode[];
-};
-
-// Check if any line is renderable under current hide rules
-function hasRenderableContent(blocks: BlockNode[], hideProperties: boolean, hideReferences: boolean, alwaysHideKeys: string[] = [], hidePageRefs: boolean = false, hideQueries: boolean = false, removeStrings: string[] = []): boolean {
-  const check = (bs: BlockNode[]): boolean => {
-    for (const b of bs) {
-  const raw = (b.content ?? '');
-      let processed = raw;
-      if (removeStrings && removeStrings.length) {
-        for (const rs of removeStrings) if (rs) processed = processed.split(rs).join('');
-      }
-      const lines = processed.split('\n');
-      for (const line of lines) {
-        let l = line.replace(/\r/g, '');
-        if (removeStrings && removeStrings.length) {
-          for (const rs of removeStrings) if (rs) l = l.split(rs).join('');
-        }
-        if (isForcedHiddenPropLine(l, alwaysHideKeys)) continue;
-  if (hideProperties && l.includes(':: ')) continue;
-  // Apply query hiding first
-  if (hideQueries && /\{\{\s*query\b/i.test(l)) continue;
-  // Transform page refs if needed (hide => remove brackets keep text already handled later in render; here treat same as strip for emptiness test)
-  let transformed = l;
-  if (hidePageRefs) transformed = transformed.replace(/\[\[([^\]]+)\]\]/g,'$1');
-  // After all transformations, then consider blank line removal
-  if (transformed.trim().length === 0) continue;
-        const onlyRef = /^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*\(\([0-9a-fA-F-]{36}\)\)\s*$/.test(l);
-        const onlyEmbed = /^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*\{\{\s*embed\b[^}]*\}\}\s*$/i.test(l);
-        if (hideReferences && (onlyRef || onlyEmbed)) continue;
-        // Found at least one visible line
-        return true;
-      }
-      if (b.children && b.children.length && check(b.children)) return true;
-    }
-    return false;
-  };
-  return check(blocks);
-}
-
-// Detect an id:: property line (to be removed in all modes)
-function getPropertyKeyFromLine(line: string): string | null {
-  // Matches optional bullet/number + optional checkbox, then key :: value
-  const m = line.match(/^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*([^:\n]+?)\s*::\s*/);
-  if (!m) return null;
-  return m[1].trim();
-}
-function isForcedHiddenPropLine(line: string, alwaysHideKeys: string[]): boolean {
-  const key = getPropertyKeyFromLine(line);
-  if (!key) return false;
-  const k = key.toLowerCase();
-  if (k === 'id' || k === 'collapsed') return true;
-  return alwaysHideKeys.includes(k);
-}
-
-// ===== ジャーナルリンク判定ユーティリティ =====
-function normalizeDigits(s: string): string {
-  return s.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFF10 + 48));
-}
-function parseDateByPattern(text: string, pattern: string): { y: number; m: number; d: number } | null {
-  if (!text || !pattern) return null;
-  const t = normalizeDigits(String(text).trim());
-  const p = String(pattern).trim();
-  // Escape regex meta chars and replace tokens
-  const esc = p.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-  const order: Array<'yyyy' | 'MM' | 'dd'> = [];
-  const reStr = esc.replace(/yyyy|MM|dd/g, (m: any) => {
-    order.push(m);
-    if (m === 'yyyy') return '(\\d{4})';
-    return '(\\d{1,2})';
-  });
-  const re = new RegExp('^\\s*' + reStr + '\\s*$');
-  const m = re.exec(t);
-  if (!m) return null;
-  let y = 0, M = 0, d = 0;
-  for (let i = 0; i < order.length; i++) {
-    const v = parseInt(m[i + 1], 10);
-    if (order[i] === 'yyyy') y = v; else if (order[i] === 'MM') M = v; else d = v;
-  }
-  if (!(y && M && d)) return null;
-  if (M < 1 || M > 12) return null;
-  if (d < 1 || d > 31) return null;
-  const dt = new Date(y, M - 1, d);
-  if (dt.getFullYear() !== y || dt.getMonth() !== M - 1 || dt.getDate() !== d) return null;
-  return { y, m: M, d };
-}
-function toJournalPageNameIfDateUsing(pattern: string, s: string): string | null {
-  const r = parseDateByPattern(s, pattern);
-  if (!r) return null;
-  const y = String(r.y).padStart(4, '0');
-  const m = String(r.m).padStart(2, '0');
-  const d = String(r.d).padStart(2, '0');
-  return `${y}_${m}_${d}`;
-}
-
-const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; currentGraph?: string; onOpenPage?: (name: string) => void; folderMode?: boolean; stripPageBrackets?: boolean; hidePageRefs?: boolean; hideQueries?: boolean; assetsDirHandle?: FileSystemDirectoryHandle; removeStrings?: string[]; normalizeTasks?: boolean; journalLinkPattern?: string }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], currentGraph, onOpenPage, folderMode, stripPageBrackets, hidePageRefs, hideQueries, assetsDirHandle, removeStrings = [], normalizeTasks = false, journalLinkPattern }) => {
-  const { t } = useTranslation();
-  const normalizeTaskLinesLocal = (text: string, enable: boolean) => {
-    if (!enable) return text;
-    const statusRe = /^(\s*)([-*+]\s+)?(TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS|HABIT|START|STARTED|DONE|CANCELED|CANCELLED)\s+/i;
-    return text.split('\n').map(line => {
-      if (/^\s*```/.test(line)) return line;
-      const m = line.match(statusRe);
-      if (!m) return line;
-      if (/^\s*[-*+]\s+\[[ xX-]\]/.test(line)) return line;
-      const status = (m[3]||'').toUpperCase();
-      const done = /DONE/.test(status);
-      const cancel = /CANCEL/.test(status);
-      const box = done ? '[x]' : (cancel ? '[-]' : '[ ]');
-      return line.replace(statusRe, `${m[1]||''}${m[2]||''}${box} `);
-    }).join('\n');
-  };
-  if (!blocks || blocks.length === 0) return <div className='sidebar-empty'>{t('no-content')}</div>;
-  const [assetUrls, setAssetUrls] = useState<Record<string,string>>({});
-  const pendingRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!folderMode || !assetsDirHandle) return;
-    const assets: string[] = [];
-    const visit = (arr: BlockNode[]) => {
-      for (const b of arr) {
-        const raw = b.content || '';
-        for (const line of raw.split('\n')) {
-          const mdImg = line.match(/!\[[^\]]*\]\((\.\.\/assets\/[^)]+)\)/i);
-          const orgImg = line.match(/\[\[(\.\.\/assets\/[^\]]+)\]/i);
-          const p = (mdImg && mdImg[1]) || (orgImg && orgImg[1]);
-          if (p && p.startsWith('../assets/')) {
-            const fn = p.replace(/^\.\.\/assets\//, '');
-            if (!assetUrls[fn]) assets.push(fn);
-          }
-        }
-        if (b.children && b.children.length) visit(b.children as any);
-      }
-    };
-    visit(blocks);
-    if (assets.length === 0) return;
-    assets.forEach(fn => {
-      if (pendingRef.current.has(fn)) return;
-      pendingRef.current.add(fn);
-      (async () => {
-        try {
-          const fh = await assetsDirHandle.getFileHandle(fn).catch(()=>null);
-          if (!fh) return;
-          const file = await fh.getFile();
-          const url = URL.createObjectURL(file);
-          setAssetUrls(prev => ({ ...prev, [fn]: url }));
-        } finally {
-          pendingRef.current.delete(fn);
-        }
-      })();
-    });
-  }, [blocks, folderMode, assetsDirHandle]);
-  const sanitize = (s?: string) => {
-  let raw = (s ?? '');
-    if (removeStrings && removeStrings.length) {
-      for (const rs of removeStrings) if (rs) raw = raw.split(rs).join('');
-    }
-    const noForced = raw.split('\n').filter(line => !isForcedHiddenPropLine(line, alwaysHideKeys)).join('\n').trimEnd();
-    if (!hideProperties) return noForced;
-    return noForced.split('\n').filter(line => !line.includes(':: ')).join('\n').trimEnd();
-  };
-  const renderLine = (line: string, idx: number) => {
-    const mdImg = line.match(/^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*!\[([^\]]*)\]\((\.\.\/assets\/[^)]+)\)(?:\{\:[^}]*\})?/i);
-    const orgImg = line.match(/^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*\[\[(\.\.\/assets\/[^\]]+)\](?:\[[^\]]*\])?\]/i);
-    const assetPath = (mdImg && mdImg[2]) || (orgImg && orgImg[1]);
-    if (assetPath && currentGraph) {
-      let src: string | null = null;
-      if (folderMode && assetPath.startsWith('../assets/')) {
-        const fileName = assetPath.replace(/^\.\.\/assets\//, '');
-        src = assetUrls[fileName] || null;
-      }
-      if (!src) src = currentGraph.replace('logseq_local_', '') + '/' + assetPath.replace(/^\.\.\//, '');
-      const isPdf = /\.pdf(\?|#|$)/i.test(assetPath);
-      if (isPdf) {
-        const label = (mdImg && mdImg[1]) || assetPath.split('/').pop() || 'PDF';
-        return <div key={idx} className='ls-block-line'><a href={src} target='_blank' rel='noopener noreferrer' className='ls-asset-link pdf' title={label}>📄 {label}</a></div>;
-      }
-      return <div key={idx} className='ls-block-line image'><a href={src} target='_blank' rel='noopener noreferrer' className='ls-img-link'><img src={src} alt={(mdImg && mdImg[1]) || ''} className='ls-img' /></a></div>;
-    }
-    // page refs: [[Page Title]] -> make clickable to open in preview tab
-    const withLinks: Array<React.ReactNode> = [];
-    let lastIndex = 0;
-    const regex = /\[\[([^\]]+)\]\]/g;
-    let m: RegExpExecArray | null;
-    while ((m = regex.exec(line)) !== null) {
-  const before = line.slice(lastIndex, m.index);
-      if (before) withLinks.push(before);
-  let name = m[1];
-  // 入力書式が日付ならジャーナルページ名に変換
-  const j = journalLinkPattern ? toJournalPageNameIfDateUsing(journalLinkPattern, name) : null;
-  if (j) name = j;
-      // If content looks like a URL, don't treat as page ref here; keep raw for external link pass
-      const looksUrl = /(^|\s)([a-zA-Z]+:\/\/|www\.)/.test(name);
-      if (looksUrl) {
-        withLinks.push(m[0]);
-  } else if (onOpenPage && !hidePageRefs) {
-        withLinks.push(
-          <a
-            key={`ref-${idx}-${m.index}`}
-            href='#'
-            className='ls-page-ref'
-            onClick={(e) => { e.preventDefault(); onOpenPage(name); }}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(name); } }}
-            tabIndex={0}
-            title={name}
-          >
-    {stripPageBrackets ? name : `[[${name}]]`}
-          </a>
-        );
-      } else {
-        withLinks.push(m[0]);
-      }
-      lastIndex = m.index + m[0].length;
-    }
-    if (lastIndex < line.length) withLinks.push(line.slice(lastIndex));
-    // stripPageBrackets: [[Page]] -> Page
-    if (stripPageBrackets) {
-      for (let i=0;i<withLinks.length;i++) {
-        if (typeof withLinks[i] === 'string') {
-          withLinks[i] = (withLinks[i] as string).replace(/\[\[([^\]]+)\]\]/g,'$1');
-        }
-      }
-    }
-    if (hideQueries && /\{\{\s*query\b/i.test(line)) return <div key={idx} className='ls-block-line'/>;
-
-    // Convert Markdown [text](url) and Org [[url][text]]/[[url]] links to anchors
-    const withMdLinks: Array<React.ReactNode> = [];
-    const getAssetUrl = (p: string): string | null => {
-      if (!p.startsWith('../assets/')) return null;
-      const fn = p.replace(/^\.\.\/assets\//, '');
-      if (folderMode) return assetUrls[fn] || null;
-      if (currentGraph) return currentGraph.replace('logseq_local_', '') + '/' + p.replace(/^\.\.\//, '');
-      return null;
-    };
-    const processMdLinks = (chunk: string, baseKey: string) => {
-      let cursor = 0;
-      // Markdown link excluding images (we already handle images above)
-      const mdRe = /\[([^\]]+)\]\(([^)]+)\)/g;
-      // Org link [[url][text]] or [[url]]
-      const orgRe = /\[\[([^\]]+)\](?:\[([^\]]*)\])?\]/g;
-      const isExternal = (u: string) => /^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/|www\.|mailto:|tel:|ftp:|file:|about:|data:|blob:|chrome:|edge:|opera:)/.test(u);
-      while (true) {
-        mdRe.lastIndex = cursor; orgRe.lastIndex = cursor;
-        const m1 = mdRe.exec(chunk);
-        const m2 = orgRe.exec(chunk);
-        let next: { type: 'md'|'org'; m: RegExpExecArray } | null = null;
-        if (m1 && (!m2 || m1.index <= m2.index)) next = { type: 'md', m: m1 };
-        else if (m2) next = { type: 'org', m: m2 };
-        if (!next) break;
-        const start = next.m.index;
-        if (start > cursor) withMdLinks.push(chunk.slice(cursor, start));
-        if (next.type === 'md') {
-          const text = next.m[1];
-          let href = next.m[2];
-          const j = journalLinkPattern ? toJournalPageNameIfDateUsing(journalLinkPattern, href) : null;
-          if (j) href = j;
-          // Asset link (relative to ../assets) -> always external style anchor with object URL if available
-          if (href.startsWith('../assets/')) {
-            const assetHref = getAssetUrl(href) || href;
-            withMdLinks.push(
-              <a key={`${baseKey}-md-${start}`} href={assetHref} target='_blank' rel='noopener noreferrer' className='ls-asset-link' title={text}>{text}</a>
-            );
-            cursor = start + next.m[0].length;
-            continue;
-          }
-          // Treat as internal page link if href doesn't look like an external URL
-          if (!isExternal(href) && onOpenPage) {
-            withMdLinks.push(
-              <a
-                key={`${baseKey}-md-${start}`}
-                href='#'
-                className='ls-page-ref'
-                onClick={(e) => { e.preventDefault(); onOpenPage(href); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(href); } }}
-                tabIndex={0}
-                title={href}
-              >
-                {text}
-              </a>
-            );
-          } else {
-            // External link
-            withMdLinks.push(
-              <a key={`${baseKey}-md-${start}`} href={href} target='_blank' rel='noopener noreferrer' className='ls-ext-link' title={text}>{text}</a>
-            );
-          }
-          cursor = start + next.m[0].length;
-        } else {
-          let url = next.m[1];
-          const j2 = journalLinkPattern ? toJournalPageNameIfDateUsing(journalLinkPattern, url) : null;
-          if (j2) url = j2;
-          const text = next.m[2] || next.m[1];
-          if (url.startsWith('../assets/')) {
-            const assetHref = getAssetUrl(url) || url;
-            withMdLinks.push(
-              <a key={`${baseKey}-org-${start}`} href={assetHref} target='_blank' rel='noopener noreferrer' className='ls-asset-link' title={text}>{text}</a>
-            );
-            cursor = start + next.m[0].length;
-            continue;
-          }
-          // Treat as internal page link if it doesn't look external
-          if (!isExternal(url) && onOpenPage) {
-            withMdLinks.push(
-              <a
-                key={`${baseKey}-org-${start}`}
-                href='#'
-                className='ls-page-ref'
-                onClick={(e) => { e.preventDefault(); onOpenPage(url); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(url); } }}
-                tabIndex={0}
-                title={url}
-              >
-                {text}
-              </a>
-            );
-          } else {
-            // External link
-            withMdLinks.push(
-              <a key={`${baseKey}-org-${start}`} href={url} target='_blank' rel='noopener noreferrer' className='ls-ext-link' title={text}>{text}</a>
-            );
-          }
-          cursor = start + next.m[0].length;
-        }
-      }
-      if (cursor < chunk.length) withMdLinks.push(chunk.slice(cursor));
-    };
-    withLinks.forEach((chunk, i) => {
-      if (typeof chunk !== 'string') { withMdLinks.push(chunk); return; }
-      processMdLinks(chunk, `lnk-${idx}-${i}`);
-    });
-
-    // Inline block refs: ((uuid)) appearing anywhere in the line
-    const InlineRef: React.FC<{ uuid: string; k: string }> = ({ uuid, k }) => {
-      const [preview, setPreview] = useState<string>('');
-      useEffect(() => {
-        let mounted = true;
-        (async () => {
-          if (folderMode) return; // Folder mode: no getBlock
-          try {
-            if ((window as any).__graphSieveDetachedMode) { return; }
-            const blk = await logseq.Editor.getBlock(uuid);
-            if (blk && mounted) {
-              const first = (blk.content || '').split('\n')[0] || '';
-              setPreview(first);
-            }
-          } catch { /* ignore */ }
-        })();
-        return () => { mounted = false; };
-      }, [uuid]);
-      if (folderMode) return <span key={k} className='ls-inline-ref ref removed'></span>;
-      const detached = (window as any).__graphSieveDetachedMode;
-      return <span key={k} className='ls-inline-ref ref faded'>[ref] <span className='ref-text'>{detached ? uuid.slice(0,8) : preview}</span></span>;
-    };
-
-  const withRefs: Array<React.ReactNode> = [];
-  withMdLinks.forEach((chunk, i) => {
-      if (typeof chunk !== 'string') { withRefs.push(chunk); return; }
-      let last = 0; let mm: RegExpExecArray | null;
-      const r = /\(\(([0-9a-fA-F-]{36})\)\)/g;
-      while ((mm = r.exec(chunk)) !== null) {
-        const before = chunk.slice(last, mm.index);
-        if (before) withRefs.push(before);
-        const uuid = mm[1];
-        if (!hideReferences) {
-          withRefs.push(<InlineRef key={`bref-${idx}-${i}-${mm.index}`} uuid={uuid} k={`bref-${idx}-${i}-${mm.index}`} />);
-        }
-        last = mm.index + mm[0].length;
-      }
-      if (last < chunk.length) withRefs.push(chunk.slice(last));
-    });
-
-    // Inline embeds: {{embed ((uuid))}} and {{embed [[Page]]}}
-    const InlineEmbedBlock: React.FC<{ uuid: string; k: string }> = ({ uuid, k }) => {
-      const [preview, setPreview] = useState<string>('');
-      useEffect(() => {
-        let mounted = true;
-        (async () => {
-          if (folderMode) return; // Folder mode: skip fetching
-          try {
-            if ((window as any).__graphSieveDetachedMode) { return; }
-            const blk = await logseq.Editor.getBlock(uuid);
-            if (blk && mounted) {
-              const first = (blk.content || '').split('\n')[0] || '';
-              setPreview(first);
-            }
-          } catch {/* ignore */}
-        })();
-        return () => { mounted = false; };
-      }, [uuid]);
-      if (folderMode) return <span key={k} className='ls-inline-embed embed removed'></span>;
-      const detached = (window as any).__graphSieveDetachedMode;
-      return <span key={k} className='ls-inline-embed embed faded'>[embed] <span className='embed-text'>{detached ? uuid.slice(0,8) : preview}</span></span>;
-    };
-
-    const InlineEmbedPage: React.FC<{ name: string; k: string }> = ({ name, k }) => {
-      if (folderMode) return <span key={k} className='ls-inline-embed embed removed'></span>;
-      return <span key={k} className='ls-inline-embed embed faded'>[embed] <span className='embed-text'>[[{name}]]</span></span>;
-    };
-
-  const withEmbeds: Array<React.ReactNode> = [];
-    withRefs.forEach((chunk, i) => {
-      if (typeof chunk !== 'string') { withEmbeds.push(chunk); return; }
-      let cursor = 0;
-      const patterns: Array<{ regex: RegExp; handler: (m: RegExpExecArray, start: number) => void }> = [
-        { regex: /\{\{\s*embed\s*\(\(([0-9a-fA-F-]{36})\)\)\s*\}\}/g, handler: (m, start) => {
-          const before = chunk.slice(cursor, start);
-          if (before) withEmbeds.push(before);
-          const uuid = m[1];
-          if (!hideReferences) withEmbeds.push(<InlineEmbedBlock key={`emb-b-${idx}-${i}-${start}`} uuid={uuid} k={`emb-b-${idx}-${i}-${start}`} />);
-          cursor = start + m[0].length;
-        } },
-        { regex: /\{\{\s*embed\s*\[\[([^\]]+)\]\]\s*\}\}/g, handler: (m, start) => {
-          const before = chunk.slice(cursor, start);
-          if (before) withEmbeds.push(before);
-          const name = m[1];
-          if (!hideReferences) withEmbeds.push(<InlineEmbedPage key={`emb-p-${idx}-${i}-${start}`} name={name} k={`emb-p-${idx}-${i}-${start}`} />);
-          cursor = start + m[0].length;
-        } },
-      ];
-
-      // Run both patterns in order of appearance
-      while (true) {
-        let nextMatch: { which: number; m: RegExpExecArray } | null = null;
-        for (let pi = 0; pi < patterns.length; pi++) {
-          patterns[pi].regex.lastIndex = cursor;
-          const m = patterns[pi].regex.exec(chunk);
-          if (m) {
-            if (!nextMatch || m.index < nextMatch.m.index) nextMatch = { which: pi, m };
-          }
-        }
-        if (!nextMatch) break;
-        patterns[nextMatch.which].handler(nextMatch.m, nextMatch.m.index);
-      }
-      if (cursor < chunk.length) withEmbeds.push(chunk.slice(cursor));
-    });
-    let finalNodes = withEmbeds.length ? withEmbeds : (withRefs.length ? withRefs : (withLinks.length ? withLinks : [line]));
-    if (hideReferences) {
-      // 参照/埋め込み非表示時に embed マクロ残骸を空化
-      finalNodes = finalNodes.map(n => typeof n === 'string' ? n.replace(/\{\{\s*embed[^}]*\}\}/gi,'') : n);
-    }
-    return <div key={idx} className={'ls-block-line' + (line.includes(':: ') && !hideProperties ? ' prop' : '')}>{finalNodes}</div>;
-  };
-  // Block ref: ((uuid))
-  const isRef = (line: string) => /\(\([0-9a-fA-F-]{36}\)\)/.test(line);
-  // Embed: {{embed ...}} supports both ((uuid)) and [[Page]] and any content; treat as embed if macro appears
-  const isEmbed = (line: string) => /\{\{\s*embed\b[^}]*\}\}/i.test(line);
-  const isOnlyRef = (line: string) => /^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*\(\([0-9a-fA-F-]{36}\)\)\s*$/.test(line);
-  const isOnlyEmbed = (line: string) => /^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*\{\{\s*embed\b[^}]*\}\}\s*$/i.test(line);
-
-    const RefLine: React.FC<{ line: string }> = ({ line }) => {
-    const uuidMatch = line.match(/[0-9a-fA-F-]{36}/);
-    const [preview, setPreview] = useState<string>('');
-    useEffect(() => {
-      let mounted = true;
-      (async () => {
-        if (folderMode) return; // Skip fetching in folder mode
-        if (uuidMatch) {
-          try {
-            if ((window as any).__graphSieveDetachedMode) { return; }
-            const blk = await logseq.Editor.getBlock(uuidMatch[0]);
-            if (blk && mounted) {
-              const first = (blk.content || '').split('\n')[0] || '';
-              setPreview(first);
-            }
-          } catch { /* ignore */ }
-        } else {
-          const pageMatch = line.match(/\[\[([^\]]+)\]\]/);
-          if (pageMatch && mounted) setPreview(pageMatch[1]);
-        }
-      })();
-      return () => { mounted = false; };
-    }, []);
-      if (folderMode) return <></>; // Entire ref line removed in folder mode
-      const isE = isEmbed(line);
-      return (
-        <div className={'ls-block-line ref ' + (isE ? 'embed' : 'reference')}>
-          {isE ? '[embed] ' : '[ref] '}
-          <span className='ref-text'>{preview}</span>
-        </div>
-      );
-  };
-
-  return (
-    <ul className='ls-block-list'>
-  {blocks.map((b, i) => {
-  const text = sanitize(b.content);
-  let rawLines = (b.content ?? '').split('\n');
-  // Always exclude forced hidden property lines
-  rawLines = rawLines.filter(line => !isForcedHiddenPropLine(line, alwaysHideKeys));
-        // Apply filters to determine if this block has any visible line after hiding props/refs-only and empties
-        const filteredLines = rawLines.filter(line => {
-          const l = line.replace(/\r/g, '');
-          if (hideProperties && l.includes(':: ')) return false;
-          if (l.trim().length === 0) return false;
-          const only = isOnlyRef(l) || isOnlyEmbed(l);
-          if (hideReferences && only) return false;
-          return true;
-        });
-        const hasRenderable = filteredLines.length > 0;
-  let visibleLines = hideProperties ? (text ? text.split('\n') : []) : rawLines;
-        return (
-          <li key={i} className={'ls-block-item' + (hasRenderable ? '' : ' no-content')}>
-            <div className='ls-block-content'>
-              {visibleLines.map((line, idx) => {
-                const ln = line.replace(/\r/g, '');
-                // Skip forced hidden property lines in any case
-                if (isForcedHiddenPropLine(ln, alwaysHideKeys)) return null;
-                // Remove artifact lines like '- -' (double dash only)
-                if (/^\s*-\s*-\s*$/.test(ln)) return null;
-                const only = isOnlyRef(ln) || isOnlyEmbed(ln);
-                if ((isRef(ln) || isEmbed(ln))) {
-                  if (hideReferences && only) return null;
-                  if (only) return <RefLine key={idx} line={ln} />
-                }
-                // Folder mode: drop lines that are just a lone '-'
-                if (folderMode && /^\s*-\s*$/.test(ln)) return null;
-                let processedLine = ln;
-                if (removeStrings && removeStrings.length) {
-                  for (const rs of removeStrings) if (rs) processedLine = processedLine.split(rs).join('');
-                }
-                if (hideQueries && /\{\{\s*query\b/i.test(processedLine)) return null;
-                // IMPORTANT: Bracket stripping for [[Page]] is handled inside renderLine after link generation so that links remain clickable even when stripping.
-                if (folderMode) {
-                  // In folder mode, remove inline ref/embed tokens entirely from the line content
-                  let processed = processedLine
-                    // Remove inline block refs ((uuid))
-                    .replace(/\(\([0-9a-fA-F-]{36}\)\)/g, '')
-                    // Remove inline embed block {{embed ((uuid))}}
-                    .replace(/\{\{\s*embed\s*\(\([0-9a-fA-F-]{36}\)\)\s*\}\}/gi, '')
-                    // Remove inline embed page {{embed [[Page]]}}
-                    .replace(/\{\{\s*embed\s*\[\[[^\]]+\]\]\s*\}\}/gi, '')
-                    .replace(/\s+/g, ' ') // collapse whitespace
-                    .trim();
-                  if (normalizeTasks) processed = normalizeTaskLinesLocal(processed, true);
-                  if (processed.length === 0) return null; // drop line if becomes empty
-                  return renderLine(processed, idx);
-                }
-                if (processedLine.trim().length === 0) return null;
-                const normalized = normalizeTasks ? normalizeTaskLinesLocal(processedLine, true) : processedLine;
-                return renderLine(normalized, idx);
-              })}
-            </div>
-            {b.children && b.children.length > 0 && (
-              <BlockList blocks={b.children as BlockNode[]} hideProperties={hideProperties} hideReferences={hideReferences} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={onOpenPage} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} journalLinkPattern={journalLinkPattern} />
-            )}
-          </li>
-        );
-      })}
-    </ul>
-  );
-};
-
-
-// 旧インラインのテキスト処理ロジックは utils/blockText へ移動
-
-// InfoView was removed with the Info panel; assets are now surfaced inline when needed.
