@@ -5,6 +5,9 @@ import { useTranslation } from "react-i18next";
 import i18n from "i18next";
 import { db, Box } from './db';
 import './App.css'
+import { useUiTypography } from './hooks/useUiTypography';
+import { useAutoScrollActiveTab } from './hooks/useAutoScrollActiveTab';
+import { useTileGridMeasure } from './hooks/useTileGridMeasure';
 import { PlainTextView, RawCustomView, outlineTextFromBlocks, flattenBlocksToText, blocksToPlainText } from './utils/blockText';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Button, IconButton, InputAdornment, TextField, Switch, FormControlLabel, Tooltip, Chip, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
@@ -16,6 +19,10 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import StarIcon from '@mui/icons-material/Star';
 import { encodeLogseqFileName, getLastUpdatedTime, getSummary, getSummaryFromRawText, parseOperation, sleep, decodeLogseqFileName } from './utils';
+import { normalizeTaskLines as normalizeTaskLinesUtil, removeMacroTokens as removeMacroTokensUtil } from './utils/text';
+import { boxService } from './services/boxService';
+import { queryPagesBasic, getPageBlocksTreeSafe, PageTuple } from './services/queryService';
+import { getString, setString, getBoolean, setBoolean, getNumber, setNumber, remove as lsRemove } from './utils/storage';
 import type { MarkdownOrOrg, FileChanges } from './types';
 import BoxCard from './components/BoxCard';
 
@@ -34,43 +41,24 @@ function App() {
   const [preferredDateFormat, setPreferredDateFormat] = useState<string>('');
   // 日付/フォント設定機能削除に伴い固定スタイル & 既定日付書式を使用
   // ジャーナル日付表示パターン (ユーザー設定可能)
-  const [journalDatePattern, setJournalDatePattern] = useState<string>(() => {
-    try { return localStorage.getItem('journalDatePattern') || 'yyyy/MM/dd'; } catch { return 'yyyy/MM/dd'; }
-  });
-  useEffect(()=>{ try { localStorage.setItem('journalDatePattern', journalDatePattern); } catch {} }, [journalDatePattern]);
+  const [journalDatePattern, setJournalDatePattern] = useState<string>(() => getString('journalDatePattern', 'yyyy/MM/dd'));
+  useEffect(()=>{ setString('journalDatePattern', journalDatePattern); }, [journalDatePattern]);
   // ジャーナルリンク判定パターン（プレビュー内リンクをジャーナルとして解釈するための入力書式）
-  const [journalLinkPattern, setJournalLinkPattern] = useState<string>(() => {
-    try { return localStorage.getItem('journalLinkPattern') || 'yyyy/MM/dd'; } catch { return 'yyyy/MM/dd'; }
-  });
-  useEffect(()=>{ try { localStorage.setItem('journalLinkPattern', journalLinkPattern); } catch {} }, [journalLinkPattern]);
+  const [journalLinkPattern, setJournalLinkPattern] = useState<string>(() => getString('journalLinkPattern', 'yyyy/MM/dd'));
+  useEffect(()=>{ setString('journalLinkPattern', journalLinkPattern); }, [journalLinkPattern]);
   // グローバル設定（現在はプレースホルダ）
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   // ===== UI フォント設定 (再導入) =====
-  const [uiFontSize, setUiFontSize] = useState<number>(() => { try { return parseInt(localStorage.getItem('uiFontSize')||'13',10)||13; } catch { return 13; } });
-  const [uiFontFamily, setUiFontFamily] = useState<string>(() => { try { return localStorage.getItem('uiFontFamily')||''; } catch { return ''; } });
-  const [uiLineHeight, setUiLineHeight] = useState<number>(()=>{try{return parseFloat(localStorage.getItem('uiLineHeight')||'1.5')||1.5;}catch{return 1.5;}});
-  const [uiFontWeight, setUiFontWeight] = useState<number>(()=>{try{return parseInt(localStorage.getItem('uiFontWeight')||'400',10)||400;}catch{return 400;}});
-  useEffect(()=>{ try { localStorage.setItem('uiFontSize', String(uiFontSize)); } catch{} },[uiFontSize]);
-  useEffect(()=>{ try { localStorage.setItem('uiFontFamily', uiFontFamily); } catch{} },[uiFontFamily]);
-  useEffect(()=>{ try { localStorage.setItem('uiLineHeight', String(uiLineHeight)); } catch{} },[uiLineHeight]);
-  useEffect(()=>{ try { localStorage.setItem('uiFontWeight', String(uiFontWeight)); } catch{} },[uiFontWeight]);
+  const [uiFontSize, setUiFontSize] = useState<number>(() => getNumber('uiFontSize', 13));
+  const [uiFontFamily, setUiFontFamily] = useState<string>(() => getString('uiFontFamily', ''));
+  const [uiLineHeight, setUiLineHeight] = useState<number>(() => Number(getString('uiLineHeight', '1.5')) || 1.5);
+  const [uiFontWeight, setUiFontWeight] = useState<number>(() => getNumber('uiFontWeight', 400));
+  useEffect(()=>{ setNumber('uiFontSize', uiFontSize); },[uiFontSize]);
+  useEffect(()=>{ setString('uiFontFamily', uiFontFamily); },[uiFontFamily]);
+  useEffect(()=>{ setString('uiLineHeight', String(uiLineHeight)); },[uiLineHeight]);
+  useEffect(()=>{ setNumber('uiFontWeight', uiFontWeight); },[uiFontWeight]);
   // Google Fonts 自動読み込み + 動的スタイル注入
-  useEffect(()=>{
-    const linkId = 'gsv-google-font';
-    let link = document.getElementById(linkId) as HTMLLinkElement | null;
-    if (uiFontFamily && /[A-Za-z]/.test(uiFontFamily)) {
-      const fam = uiFontFamily.trim().replace(/\s+/g,'+');
-      const href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fam)}:wght@300;400;500;600;700;800&display=swap`;
-      if(!link){ link = document.createElement('link'); link.id = linkId; link.rel='stylesheet'; document.head.appendChild(link); }
-      link.href = href;
-    } else if(link) link.remove();
-    const styleId = 'gsv-ui-font-style';
-    let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
-    if(!styleEl){ styleEl = document.createElement('style'); styleEl.id = styleId; document.head.appendChild(styleEl); }
-    const famDecl = uiFontFamily ? `"${uiFontFamily}", system-ui, sans-serif` : 'system-ui, sans-serif';
-    styleEl.textContent = `#app{--gsv-font-size:${uiFontSize}px;--gsv-line-height:${uiLineHeight};--gsv-font-weight:${uiFontWeight};--gsv-font-family:${famDecl};font-size:var(--gsv-font-size);line-height:var(--gsv-line-height);font-family:var(--gsv-font-family);}`+
-      `#app .card-title,#app .card-body-text,#app .sidebar-inner,#app .left-pane,#app .box{font-size:inherit;line-height:inherit;font-family:inherit;}`;
-  },[uiFontFamily, uiFontSize, uiLineHeight, uiFontWeight]);
+  useUiTypography(uiFontFamily, uiFontSize, uiLineHeight, uiFontWeight);
   const resetUiFont = () => { setUiFontSize(13); setUiFontFamily(''); setUiLineHeight(1.5); setUiFontWeight(400); };
   const [preferredFormat, setPreferredFormat] = useState<MarkdownOrOrg>('markdown');
   const [loading, setLoading] = useState<boolean>(true);
@@ -88,67 +76,42 @@ function App() {
   const [tileRowSize, setTileRowSize] = useState<number>(0);
   const [maxBoxNumber, setMaxBoxNumber] = useState<number>(50); // initial fetch size
   // Exclude journals toggle (default true)
-  const [excludeJournals, setExcludeJournals] = useState<boolean>(() => {
-    try { const v = localStorage.getItem('excludeJournals'); return v === null ? true : v === 'true'; } catch { return true; }
-  });
+  const [excludeJournals, setExcludeJournals] = useState<boolean>(() => getBoolean('excludeJournals', true));
   // 自動デタッチモード: Logseq が現在開いているグラフとプラグインで扱うグラフが異なる場合 true
   const [detachedMode, setDetachedMode] = useState<boolean>(false);
   const [logseqCurrentGraph, setLogseqCurrentGraph] = useState<string>('');
   // 明示的モード: Logseq既存グラフ or フォルダ(fs_)
-  const [graphMode, setGraphMode] = useState<'logseq' | 'folder'>(() => {
-    try {
-      const v = localStorage.getItem('graphMode');
-      return v === 'folder' ? 'folder' : 'logseq';
-    } catch { return 'logseq'; }
-  });
+  const [graphMode, setGraphMode] = useState<'logseq' | 'folder'>(() => (getString('graphMode', 'logseq') === 'folder' ? 'folder' : 'logseq'));
   // Sidebar preview sessions (multi-preview)
   type PreviewTab = 'content' | 'nomark' | 'outline' | 'raw-custom';
   type Preview = { box: Box; blocks: any[] | null; loading: boolean; tab: PreviewTab; pinned: boolean; createdAt: number };
   const [previews, setPreviews] = useState<Preview[]>([]);
   const [activePreviewIndex, setActivePreviewIndex] = useState<number>(-1);
   const [hoverCloseIndex, setHoverCloseIndex] = useState<number | null>(null);
-  const [maxPreviewTabs, setMaxPreviewTabs] = useState<number>(() => {
-    try { const v = parseInt(localStorage.getItem('maxPreviewTabs') || '10', 10); return v > 0 ? v : 10; } catch { return 10; }
-  });
-  useEffect(() => { try { localStorage.setItem('maxPreviewTabs', String(maxPreviewTabs)); } catch {} }, [maxPreviewTabs]);
-  const [hideProperties, setHideProperties] = useState<boolean>(() => {
-    try {
-      const v = localStorage.getItem('hideProperties');
-      return v === null ? true : v === 'true';
-    } catch { return true; }
-  });
+  const [maxPreviewTabs, setMaxPreviewTabs] = useState<number>(() => getNumber('maxPreviewTabs', 10) || 10);
+  useEffect(() => { setNumber('maxPreviewTabs', maxPreviewTabs); }, [maxPreviewTabs]);
+  const [hideProperties, setHideProperties] = useState<boolean>(() => getBoolean('hideProperties', true));
   // Refs/embeds は常に非表示 (トグル廃止) - 呼び出し側では true を直接渡す
   // 空行除去: トグル廃止し常に有効（実装は各処理で空行除去）
   // [[Page]] 括弧だけ除去トグル（デフォルトON）
-  const [stripPageBrackets, setStripPageBrackets] = useState<boolean>(() => {
-    try { const v = localStorage.getItem('stripPageBrackets'); return v === null ? true : v === 'true'; } catch { return true; }
-  });
+  const [stripPageBrackets, setStripPageBrackets] = useState<boolean>(() => getBoolean('stripPageBrackets', true));
   // Page refs 自体を非表示 (行から除去) （デフォルトOFF）
   const [hidePageRefs, setHidePageRefs] = useState<boolean>(() => {
-    try {
-      const v = localStorage.getItem('hidePageRefs');
-      if (v !== null) return v === 'true';
-      // migration from old key removePageRefs (true meant old combined behavior)
-      const legacy = localStorage.getItem('removePageRefs');
-      if (legacy === 'true') {
-        // keep old intent: hidePageRefs OFF by default now; if user explicitly had old toggle ON, map to hiding page refs fully? Old meaning was strip brackets; new mapping better: set stripPageBrackets true (already default) and keep hidePageRefs false.
-        // So do not turn on hidePageRefs; just clear legacy key.
-        try { localStorage.removeItem('removePageRefs'); } catch {}
-        return false;
-      }
+    const v = getString('hidePageRefs', '');
+    if (v !== '') return v === 'true';
+    const legacy = getString('removePageRefs', '');
+    if (legacy === 'true') {
+      lsRemove('removePageRefs');
       return false;
-    } catch { return false; }
+    }
+    return false;
   });
   // クエリ ({{query ...) を隠すトグル（デフォルトOFF）
-  const [hideQueries, setHideQueries] = useState<boolean>(() => {
-    try { const v = localStorage.getItem('hideQueries'); return v === 'true'; } catch { return false; }
-  });
+  const [hideQueries, setHideQueries] = useState<boolean>(() => getBoolean('hideQueries', false));
   // RAWタブ: アウトライン(概要)とフルソース切替
   // rawFullMode 廃止: 常に SUMMARY スタイル (旧 RawCustomView)
   // Option: always hide specific property keys (comma-separated), persisted in localStorage
-  const [alwaysHidePropKeys, setAlwaysHidePropKeys] = useState<string>(() => {
-    try { return localStorage.getItem('alwaysHideProps') || ''; } catch { return ''; }
-  });
+  const [alwaysHidePropKeys, setAlwaysHidePropKeys] = useState<string>(() => getString('alwaysHideProps', ''));
   const alwaysHideKeys = useMemo(() => {
     return alwaysHidePropKeys
       .split(',')
@@ -156,21 +119,17 @@ function App() {
       .filter(Boolean);
   }, [alwaysHidePropKeys]);
   // 特定文字列を本文から除去 (カンマ区切りそのまま / 大文字小文字区別)
-  const [removeStringsRaw, setRemoveStringsRaw] = useState<string>(() => {
-    try { return localStorage.getItem('removeStrings') || ''; } catch { return ''; }
-  });
+  const [removeStringsRaw, setRemoveStringsRaw] = useState<string>(() => getString('removeStrings', ''));
   const removeStrings = useMemo(() => removeStringsRaw.split(',').filter(s => s.length > 0), [removeStringsRaw]);
   // Logseq マクロ除去トグル
-  const [removeMacros, setRemoveMacros] = useState<boolean>(() => { try { const v = localStorage.getItem('removeMacros'); return v === 'true'; } catch { return false; } });
-  useEffect(()=>{ try { localStorage.setItem('removeMacros', String(removeMacros)); } catch {} }, [removeMacros]);
+  const [removeMacros, setRemoveMacros] = useState<boolean>(() => getBoolean('removeMacros', false));
+  useEffect(()=>{ setBoolean('removeMacros', removeMacros); }, [removeMacros]);
   // タスクステータス正規化トグル
-  const [normalizeTasks, setNormalizeTasks] = useState<boolean>(() => { try { const v = localStorage.getItem('normalizeTasks'); return v === 'true'; } catch { return false; } });
-  useEffect(()=>{ try { localStorage.setItem('normalizeTasks', String(normalizeTasks)); } catch {} }, [normalizeTasks]);
+  const [normalizeTasks, setNormalizeTasks] = useState<boolean>(() => getBoolean('normalizeTasks', false));
+  useEffect(()=>{ setBoolean('normalizeTasks', normalizeTasks); }, [normalizeTasks]);
   // サイドバー設定表示トグル（Hide properties 等をまとめて隠す）
-  const [showSidebarSettings, setShowSidebarSettings] = useState<boolean>(() => {
-    try { const v = localStorage.getItem('showSidebarSettings'); return v === 'true'; } catch { return false; }
-  });
-  useEffect(() => { try { localStorage.setItem('showSidebarSettings', String(showSidebarSettings)); } catch {} }, [showSidebarSettings]);
+  const [showSidebarSettings, setShowSidebarSettings] = useState<boolean>(() => getBoolean('showSidebarSettings', false));
+  useEffect(() => { setBoolean('showSidebarSettings', showSidebarSettings); }, [showSidebarSettings]);
   // COPY CONTENT 対象ハイライト用
   const [copyHover, setCopyHover] = useState<boolean>(false);
   const sidebarBodyRef = useRef<HTMLDivElement | null>(null);
@@ -179,62 +138,25 @@ function App() {
 
   // collapsed プロパティ行除去は既に isForcedHiddenPropLine で対応 (key === 'collapsed') されているが、念のため本文再構築時にも除外
 
-  // タスク正規化ユーティリティ
-  const normalizeTaskLines = (text: string, enable: boolean) => {
-    if (!enable) return text;
-    const statusRe = /^(\s*)([-*+]\s+)?(TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS|HABIT|START|STARTED|DONE|CANCELED|CANCELLED)\s+/i;
-    return text.split('\n').map(line => {
-      if (/^\s*```/.test(line)) return line;
-      const m = line.match(statusRe);
-      if (!m) return line;
-      if (/^\s*[-*+]\s+\[[ xX-]\]/.test(line)) return line;
-      const status = (m[3]||'').toUpperCase();
-      const done = /DONE/.test(status);
-      const cancel = /CANCEL/.test(status);
-      const box = done ? '[x]' : (cancel ? '[-]' : '[ ]');
-      return line.replace(statusRe, `${m[1]||''}${m[2]||''}${box} `);
-    }).join('\n');
-  };
-  const removeMacroTokens = (text: string, enable: boolean, alsoQueries: boolean) => {
-    if (!enable) return text;
-    let t = text;
-    const macroRe = alsoQueries ? /\{\{[^}]*\}\}/g : /\{\{(?!\s*query)[^}]*\}\}/ig;
-    t = t.replace(macroRe,'');
-    return t.replace(/\n{2,}/g,'\n');
-  };
+  // 共通ユーティリティに委譲
+  const normalizeTaskLines = (text: string, enable: boolean) => normalizeTaskLinesUtil(text, enable);
+  const removeMacroTokens = (text: string, enable: boolean, alsoQueries: boolean) => removeMacroTokensUtil(text, enable, alsoQueries);
 
 
   // Ensure the active preview tab is visible in the global tabs scroll area
-  useEffect(() => {
-    try {
-      const bar = document.querySelector('.global-tabs-row .preview-tabs');
-      if (!bar) return;
-      const active = bar.querySelector('.preview-tab.active') as HTMLElement | null;
-      if (!active) return;
-      const barEl = bar as HTMLElement;
-      const aLeft = active.offsetLeft;
-      const aRight = aLeft + active.offsetWidth;
-      const vLeft = barEl.scrollLeft;
-      const vRight = vLeft + barEl.clientWidth;
-      if (aLeft < vLeft) {
-        barEl.scrollTo({ left: aLeft - 16, behavior: 'smooth' });
-      } else if (aRight > vRight) {
-        barEl.scrollTo({ left: aRight - barEl.clientWidth + 16, behavior: 'smooth' });
-      }
-    } catch {/* ignore */}
-  }, [previews, activePreviewIndex]);
+  useAutoScrollActiveTab([previews, activePreviewIndex]);
 
   const { t } = useTranslation();
-  useEffect(() => { try { localStorage.setItem('hideProperties', String(hideProperties)); } catch {} }, [hideProperties]);
+  useEffect(() => { setBoolean('hideProperties', hideProperties); }, [hideProperties]);
   // hideRefs: 常時 true なので永続化不要（旧キーは削除してクリーンアップ）
-  useEffect(() => { try { localStorage.removeItem('hideRefs'); } catch {} }, []);
+  useEffect(() => { lsRemove('hideRefs'); }, []);
   // removeBlankLines 永続化不要（常に true）
-  useEffect(() => { try { localStorage.setItem('stripPageBrackets', String(stripPageBrackets)); } catch {} }, [stripPageBrackets]);
-  useEffect(() => { try { localStorage.setItem('hidePageRefs', String(hidePageRefs)); } catch {} }, [hidePageRefs]);
-  useEffect(() => { try { localStorage.setItem('hideQueries', String(hideQueries)); } catch {} }, [hideQueries]);
-  useEffect(() => { try { localStorage.setItem('removeStrings', removeStringsRaw); } catch {} }, [removeStringsRaw]);
+  useEffect(() => { setBoolean('stripPageBrackets', stripPageBrackets); }, [stripPageBrackets]);
+  useEffect(() => { setBoolean('hidePageRefs', hidePageRefs); }, [hidePageRefs]);
+  useEffect(() => { setBoolean('hideQueries', hideQueries); }, [hideQueries]);
+  useEffect(() => { setString('removeStrings', removeStringsRaw); }, [removeStringsRaw]);
   // detachedMode は自動判定なので保存しない
-  useEffect(() => { try { localStorage.setItem('graphMode', graphMode); } catch {} }, [graphMode]);
+  useEffect(() => { setString('graphMode', graphMode); }, [graphMode]);
   useEffect(() => {
     const syncGraph = async () => {
       try {
@@ -282,7 +204,7 @@ function App() {
             if (cg) setCurrentGraph(cg);
           } catch { /* ignore */ }
           setGraphMode('logseq');
-          try { localStorage.setItem('graphMode', 'logseq'); } catch {/* ignore */}
+          setString('graphMode', 'logseq');
         })();
       }
     }
@@ -292,7 +214,7 @@ function App() {
   useEffect(() => {
     try { (window as any).__graphSieveDetachedMode = detachedMode; } catch { /* ignore */ }
   }, [detachedMode]);
-  useEffect(() => { try { localStorage.setItem('excludeJournals', String(excludeJournals)); } catch {} }, [excludeJournals]);
+  useEffect(() => { setBoolean('excludeJournals', excludeJournals); }, [excludeJournals]);
   // モード切替時にタブ / プレビューを全て閉じる
   useEffect(() => {
     setPreviews([]);
@@ -313,37 +235,23 @@ function App() {
           return all.slice(0, maxBoxNumber);
         })();
       }
-      if (detachedMode) {
-        return db.box.orderBy('time').reverse().limit(maxBoxNumber).toArray();
-      }
-      return db.box
-        .orderBy('time')
-        .filter(b => b.graph === currentGraph)
-        .reverse()
-        .limit(maxBoxNumber)
-        .toArray();
+  if (detachedMode) return db.box.orderBy('time').reverse().limit(maxBoxNumber).toArray();
+  return boxService.recent(currentGraph, maxBoxNumber);
     },
     [currentGraph, maxBoxNumber, detachedMode, graphMode]
   );
   
   // スクロールに応じて追加ロード（動的測定した行高を利用）
-  useEffect(() => {
-    const handleScroll = () => {
-      if (!tileRef.current) return;
-      const rh = measuredRowHeightRef.current || tileGridHeight;
-      const scrollTop = tileRef.current.scrollTop;
-      const scrolledRows = Math.floor(scrollTop / rh);
-      const columnSize = tileColumnSize || 1;
-      const rowsInAScreen = tileRowSize || 1;
-      const loadScreensAhead = 3;
-      const targetRows = rowsInAScreen + scrolledRows + rowsInAScreen * loadScreensAhead;
-      const limit = columnSize * targetRows;
-      setMaxBoxNumber(current => current < limit ? limit : current);
-    };
-    const el = tileRef.current;
-    if (el) el.addEventListener('scroll', handleScroll);
-    return () => { if (el) el.removeEventListener('scroll', handleScroll); };
-  }, [tileRowSize, tileColumnSize]);
+  useTileGridMeasure({
+    tileRef,
+    tileGridHeight,
+    measuredRowHeightRef,
+    tileColumnSize,
+    setTileColumnSize,
+    tileRowSize,
+    setTileRowSize,
+    setMaxBoxNumber,
+  });
 
   useEffect(() => {
     const handleKeyDown = (e: { key: string; }) => {
@@ -362,32 +270,7 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!tileRef.current) return;
-    tileRef.current.style.gridAutoRows = `${tileGridHeight}px`;
-    const computeRowHeight = () => {
-      if (!tileRef.current) return;
-      const first = tileRef.current.querySelector('.box') as HTMLElement | null;
-      if (first) {
-        const h = first.getBoundingClientRect().height + 16; // include margin
-        measuredRowHeightRef.current = h;
-        const container = tileRef.current;
-        const width = container.clientWidth;
-        const boxW = first.getBoundingClientRect().width;
-        if (boxW > 0) {
-          const cols = Math.max(1, Math.floor(width / boxW));
-          if (cols !== tileColumnSize) setTileColumnSize(cols);
-          const rows = Math.max(1, Math.floor(container.clientHeight / h));
-          if (rows !== tileRowSize) setTileRowSize(rows);
-        }
-      }
-    };
-    computeRowHeight();
-    const ro = new ResizeObserver(() => computeRowHeight());
-    ro.observe(tileRef.current);
-    window.addEventListener('resize', computeRowHeight);
-    return () => { try { ro.disconnect(); } catch {} window.removeEventListener('resize', computeRowHeight); };
-  }, [tileRef.current]);
+  // computeRowHeight は useTileGridMeasure に含めた
 
   useEffect(() => {
     const getUserConfigs = async () => {
@@ -487,34 +370,8 @@ function App() {
         }
 
         // 1) 軽量クエリでページ一覧取得 (original-name/title, uuid, updated-at, journal?)
-  type RawTuple = [string, string, number | undefined, boolean | undefined];
-        let tuples: RawTuple[] = [];
-        try {
-          const q: any[] = await logseq.DB.datascriptQuery(`
-          [:find ?name ?uuid ?updated ?journal
-            :where
-            (or
-              [?p :block/original-name ?name]
-              [?p :block/title ?name])
-            [?p :block/uuid ?uuid]
-            (or
-              [?p :block/updated-at ?updated]
-              [(identity 0) ?updated])
-            (or
-              [?p :block/journal? ?journal]
-              (not [?p :block/journal? true]))]`);
-          // q は [ [name uuid updated journal?], ... ] 形式
-          tuples = (Array.isArray(q) ? q : []).map(r => [r[0], r[1], r[2], r[3]] as RawTuple);
-        } catch (e) {
-          console.warn('datascriptQuery failed, fallback to getAllPages()', e);
-        }
-
-        // フォールバック: 旧方式 (コスト高)
-        if (tuples.length === 0) {
-          const pages = await logseq.Editor.getAllPages();
-          if (!pages) { setLoading(false); return; }
-          tuples = pages.map(p => [ (p as any).originalName || (p as any).title, p.uuid, p.updatedAt, p['journal?'] ] as RawTuple);
-        }
+  let tuples: PageTuple[] = await queryPagesBasic();
+  if (!tuples || tuples.length === 0) { setLoading(false); return; }
 
   // 2) 重複排除（ジャーナル除外は UI 側で）
         const seen = new Set<string>();
@@ -531,7 +388,7 @@ function App() {
         while (filtered.length > 0) {
           const tuple = filtered.pop();
           if (!tuple) break;
-          const [originalName, uuid, updatedAt] = tuple;
+          const [originalName, uuid, updatedAt] = tuple as PageTuple;
           const promise = (async () => {
             let updatedTime: number | undefined = 0;
             if (currentDirHandle) {
@@ -541,11 +398,7 @@ function App() {
               updatedTime = updatedAt || 0;
             }
             if (!updatedTime) return;
-            const blocks = await logseq.Editor.getPageBlocksTree(uuid || originalName).catch(err => {
-              console.error(`Failed to get blocks: ${originalName}`);
-              console.error(err);
-              return null;
-            });
+            const blocks = await getPageBlocksTreeSafe(uuid || originalName);
             if (!blocks || blocks.length === 0) return;
             const [summary, image] = getSummary(blocks);
             if (summary.length > 0 && !(summary.length === 1 && summary[0] === '')) {
@@ -629,7 +482,7 @@ function App() {
     if (!currentGraph) return;
     (async () => {
       setLoading(true);
-      await db.box.where('graph').equals(currentGraph).delete();
+  await boxService.removeByGraph(currentGraph);
       rebuildDB();
     })();
   }, [excludeJournals, currentGraph, rebuildDB]);
@@ -648,19 +501,15 @@ function App() {
         // A trailing slash in the title cannot be recovered from the file name. 
         // This is because they are removed during encoding.
         if (operation === 'modified') {
-          const blocks = await logseq.Editor.getPageBlocksTree(originalName).catch(err => {
-            console.error(`Failed to get blocks: ${originalName}`);
-            console.error(err);
-            return null;
-          });
+          const blocks = await getPageBlocksTreeSafe(originalName);
           if (!blocks) return;
 
           const [summary, image] = getSummary(blocks);
 
           if (summary.length > 0 && !(summary.length === 1 && summary[0] === '')) {
-            const box = await db.box.get([currentGraph, originalName]);
+            const box = await boxService.get([currentGraph, originalName]);
             if (box) {
-              await db.box.update([currentGraph, originalName], {
+              await boxService.update([currentGraph, originalName], {
                 time: updatedTime,
                 summary,
                 image,
@@ -669,7 +518,7 @@ function App() {
               // create
               const page = await logseq.Editor.getPage(originalName);
               if (page) {
-                await db.box.put({
+        await boxService.upsert({
                   graph: currentGraph,
                   name: originalName,
                   uuid: page.uuid,
@@ -681,7 +530,7 @@ function App() {
             }
           } else {
             // If became empty, remove existing box
-            await db.box.delete([currentGraph, originalName]);
+      await boxService.remove([currentGraph, originalName]);
           }
         }
       }
@@ -987,10 +836,7 @@ function App() {
     // 通常 (同じ実グラフ) ロード
     try {
       const tried: string[] = [];
-      const attemptFetchBlocks = async (nm: string) => {
-        tried.push(nm);
-        return await logseq.Editor.getPageBlocksTree(nm).catch(() => null);
-      };
+  const attemptFetchBlocks = async (nm: string) => { tried.push(nm); return await getPageBlocksTreeSafe(nm); };
       let blocks: any = null;
       if (box.uuid) {
         blocks = await attemptFetchBlocks(box.uuid);
@@ -1069,7 +915,7 @@ function App() {
     try {
       const key = 'pinnedTabs_' + graphMode;
       const payload = previews.filter(p => p.pinned).map(p => ({ graph: p.box.graph, name: p.box.name }));
-      localStorage.setItem(key, JSON.stringify(payload));
+  setString(key, JSON.stringify(payload));
     } catch {/* ignore */}
   }, [previews, graphMode]);
 
@@ -1078,7 +924,7 @@ function App() {
     (async () => {
       if (previews.length > 0) return; // only auto-restore when empty
       let list: Array<{ graph: string; name: string }>; let raw: string | null = null;
-      try { raw = localStorage.getItem('pinnedTabs_' + graphMode); } catch {/* ignore */}
+  try { raw = getString('pinnedTabs_' + graphMode, ''); } catch {/* ignore */}
       if (!raw) return;
       try { list = JSON.parse(raw) || []; } catch { return; }
       if (!Array.isArray(list) || list.length === 0) return;
@@ -1086,7 +932,7 @@ function App() {
       for (const item of list) {
         if (!item || !item.graph || !item.name) continue;
         try {
-          const box = await db.box.get([item.graph, item.name]);
+          const box = await boxService.get([item.graph, item.name]);
           if (!box) continue;
           restored.push({ box, blocks: null, loading: true, tab: 'content', pinned: true, createdAt: Date.now() });
         } catch {/* ignore */}
@@ -1164,7 +1010,7 @@ function App() {
       const name = sidebarBox?.name;
       if (!name || !currentGraph) { setRelated([]); return; }
       try {
-        const boxes = await db.box.where('graph').equals(currentGraph).toArray();
+  const boxes = await boxService.allByGraph(currentGraph);
         const rel: Box[] = [];
         // children
         const childPrefix = name + '/';
@@ -1201,7 +1047,7 @@ function App() {
         const jMatch = name.match(/^(?:journals\/)?(\d{4})[_-]?(\d{2})[_-]?(\d{2})$/);
         if (jMatch) {
           const y = jMatch[1]; const m = jMatch[2];
-          const boxes = await db.box.where('graph').equals(currentGraph).toArray();
+          const boxes = await boxService.allByGraph(currentGraph);
           const siblings = boxes
             .filter(b => /^(?:journals\/)?\d{4}[_-]?\d{2}[_-]?\d{2}$/.test(b.name))
             .filter(b => b.name !== name && b.name.startsWith(`${y}_${m}`))
@@ -1342,7 +1188,7 @@ function App() {
 
   const toggleArchive = useCallback(async (box: Box, next: boolean) => {
     try {
-      await db.box.update([box.graph, box.name], { archived: next });
+  await boxService.update([box.graph, box.name], { archived: next });
       // reflect in previews state immediately
       setPreviews(prev => prev.map(p => (
         p.box.graph === box.graph && p.box.name === box.name
@@ -1356,7 +1202,7 @@ function App() {
 
   const toggleFavorite = useCallback(async (box: Box, next: boolean) => {
     try {
-      await db.box.update([box.graph, box.name], { favorite: next });
+    await boxService.update([box.graph, box.name], { favorite: next });
       // reflect in previews state immediately
       setPreviews(prev => prev.map(p => (
         p.box.graph === box.graph && p.box.name === box.name
@@ -1364,7 +1210,7 @@ function App() {
           : p
       )));
       // refresh favorites list
-  const favs = await db.box.where('graph').equals(currentGraph).and(b => !!b.favorite).reverse().sortBy('time');
+  const favs = await boxService.favoritesByGraph(currentGraph);
   setFavorites(favs.slice(0, 50));
   setLeftFavorites(favs.slice(0, 100));
     } catch (e) {
@@ -1490,8 +1336,8 @@ function App() {
   // Hover 中の補助ペイン識別 (sub/rel)
   const [hoveredSidePane, setHoveredSidePane] = useState<null | 'sub' | 'rel'>(null);
   // Journals collapse 永続化
-  useEffect(() => { try { localStorage.setItem('collapseJournals', String(collapseJournals)); } catch {} }, [collapseJournals]);
-  useEffect(() => { try { const v = localStorage.getItem('collapseJournals'); if (v !== null) setCollapseJournals(v === 'true'); } catch {} }, []);
+  useEffect(() => { setBoolean('collapseJournals', collapseJournals); }, [collapseJournals]);
+  useEffect(() => { const v = getString('collapseJournals', ''); if (v !== '') setCollapseJournals(v === 'true'); }, []);
   const groupedJournals = useMemo(() => {
     const hasNonTrivialSummary = (box?: Box) => !!box && (box.summary || []).some(l => { const t=(l||'').trim(); return t && t !== '-'; });
     type G = { key: string; label: string; items: Box[] };
@@ -1568,7 +1414,7 @@ function App() {
   // Open a page by name in a new/activated preview tab
   const openPageInPreviewByName = useCallback(async (name: string) => {
     try {
-      const found = await db.box.get([currentGraph, name]);
+  const found = await boxService.get([currentGraph, name]);
       if (found) { void openInSidebar(found); return; }
     } catch {/* ignore */}
     if (!currentGraph.startsWith('fs_')) {
@@ -1586,7 +1432,7 @@ function App() {
         const [summaryRaw, image] = getSummaryFromRawText(text);
         const summary = summaryRaw.length === 0 ? [''] : summaryRaw;
         const box: Box = { graph: currentGraph, name, uuid: '', time: located.file.lastModified, summary, image } as Box;
-        try { await db.box.put(box); } catch {/* ignore */}
+  try { await boxService.upsert(box); } catch {/* ignore */}
         void openInSidebar(box);
       } else {
         const box: Box = { graph: currentGraph, name, uuid: '', time: Date.now(), summary: [], image: '' } as Box;
@@ -1818,7 +1664,7 @@ function App() {
                   <Tooltip title={t('toggle-normalize-tasks-help') || 'Convert TODO/DONE etc. to Markdown checkboxes'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={normalizeTasks} onChange={(_, v) => setNormalizeTasks(v)} />} label={t('toggle-normalize-tasks') || 'Normalize tasks'} /></span></Tooltip>
                 </div>}
                 {showSidebarSettings && <div className='sidebar-row sidebar-row--options'>
-                  <TextField size='small' label={t('always-hide-props')} placeholder={t('always-hide-props-ph')} value={alwaysHidePropKeys} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { const v = e.target.value; setAlwaysHidePropKeys(v); try { localStorage.setItem('alwaysHideProps', v); } catch {} }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px' }} />
+                  <TextField size='small' label={t('always-hide-props')} placeholder={t('always-hide-props-ph')} value={alwaysHidePropKeys} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { const v = e.target.value; setAlwaysHidePropKeys(v); setString('alwaysHideProps', v); }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px' }} />
                   <TextField size='small' label={t('remove-strings')} placeholder={t('remove-strings-ph')} value={removeStringsRaw} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { setRemoveStringsRaw(e.target.value); }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px', marginLeft: '8px' }} />
                 </div>}
                 <div className='sidebar-row sidebar-row--actions'>
