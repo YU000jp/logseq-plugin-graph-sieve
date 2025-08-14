@@ -7,7 +7,7 @@ import { db, Box } from './db';
 import './App.css'
 import { PlainTextView, RawCustomView, outlineTextFromBlocks, flattenBlocksToText, blocksToPlainText } from './utils/blockText';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Button, IconButton, InputAdornment, TextField, Switch, FormControlLabel, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, Chip } from '@mui/material';
+import { Button, IconButton, InputAdornment, TextField, Switch, FormControlLabel, Tooltip, Chip, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import { Clear, ContentCopy } from '@mui/icons-material'; // ContentCopy still used for copy-content button
 import SettingsIcon from '@mui/icons-material/Settings';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
@@ -33,7 +33,16 @@ function App() {
   const [currentGraph, setCurrentGraph] = useState<string>('');
   const [preferredDateFormat, setPreferredDateFormat] = useState<string>('');
   // 日付/フォント設定機能削除に伴い固定スタイル & 既定日付書式を使用
-  const journalTitleFormat = 'yyyy/MM/dd';
+  // ジャーナル日付表示パターン (ユーザー設定可能)
+  const [journalDatePattern, setJournalDatePattern] = useState<string>(() => {
+    try { return localStorage.getItem('journalDatePattern') || 'yyyy/MM/dd'; } catch { return 'yyyy/MM/dd'; }
+  });
+  useEffect(()=>{ try { localStorage.setItem('journalDatePattern', journalDatePattern); } catch {} }, [journalDatePattern]);
+  // ジャーナルリンク判定パターン（プレビュー内リンクをジャーナルとして解釈するための入力書式）
+  const [journalLinkPattern, setJournalLinkPattern] = useState<string>(() => {
+    try { return localStorage.getItem('journalLinkPattern') || 'yyyy/MM/dd'; } catch { return 'yyyy/MM/dd'; }
+  });
+  useEffect(()=>{ try { localStorage.setItem('journalLinkPattern', journalLinkPattern); } catch {} }, [journalLinkPattern]);
   // グローバル設定（現在はプレースホルダ）
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   // ===== UI フォント設定 (再導入) =====
@@ -151,6 +160,12 @@ function App() {
     try { return localStorage.getItem('removeStrings') || ''; } catch { return ''; }
   });
   const removeStrings = useMemo(() => removeStringsRaw.split(',').filter(s => s.length > 0), [removeStringsRaw]);
+  // Logseq マクロ除去トグル
+  const [removeMacros, setRemoveMacros] = useState<boolean>(() => { try { const v = localStorage.getItem('removeMacros'); return v === 'true'; } catch { return false; } });
+  useEffect(()=>{ try { localStorage.setItem('removeMacros', String(removeMacros)); } catch {} }, [removeMacros]);
+  // タスクステータス正規化トグル
+  const [normalizeTasks, setNormalizeTasks] = useState<boolean>(() => { try { const v = localStorage.getItem('normalizeTasks'); return v === 'true'; } catch { return false; } });
+  useEffect(()=>{ try { localStorage.setItem('normalizeTasks', String(normalizeTasks)); } catch {} }, [normalizeTasks]);
   // サイドバー設定表示トグル（Hide properties 等をまとめて隠す）
   const [showSidebarSettings, setShowSidebarSettings] = useState<boolean>(() => {
     try { const v = localStorage.getItem('showSidebarSettings'); return v === 'true'; } catch { return false; }
@@ -159,6 +174,35 @@ function App() {
   // COPY CONTENT 対象ハイライト用
   const [copyHover, setCopyHover] = useState<boolean>(false);
   const sidebarBodyRef = useRef<HTMLDivElement | null>(null);
+
+  // (Create Page dialog removed)
+
+  // collapsed プロパティ行除去は既に isForcedHiddenPropLine で対応 (key === 'collapsed') されているが、念のため本文再構築時にも除外
+
+  // タスク正規化ユーティリティ
+  const normalizeTaskLines = (text: string, enable: boolean) => {
+    if (!enable) return text;
+    const statusRe = /^(\s*)([-*+]\s+)?(TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS|HABIT|START|STARTED|DONE|CANCELED|CANCELLED)\s+/i;
+    return text.split('\n').map(line => {
+      if (/^\s*```/.test(line)) return line;
+      const m = line.match(statusRe);
+      if (!m) return line;
+      if (/^\s*[-*+]\s+\[[ xX-]\]/.test(line)) return line;
+      const status = (m[3]||'').toUpperCase();
+      const done = /DONE/.test(status);
+      const cancel = /CANCEL/.test(status);
+      const box = done ? '[x]' : (cancel ? '[-]' : '[ ]');
+      return line.replace(statusRe, `${m[1]||''}${m[2]||''}${box} `);
+    }).join('\n');
+  };
+  const removeMacroTokens = (text: string, enable: boolean, alsoQueries: boolean) => {
+    if (!enable) return text;
+    let t = text;
+    const macroRe = alsoQueries ? /\{\{[^}]*\}\}/g : /\{\{(?!\s*query)[^}]*\}\}/ig;
+    t = t.replace(macroRe,'');
+    return t.replace(/\n{2,}/g,'\n');
+  };
+
 
   // Ensure the active preview tab is visible in the global tabs scroll area
   useEffect(() => {
@@ -1109,94 +1153,43 @@ function App() {
   const sidebarLoading = activePreview?.loading || false;
   const sidebarTab: PreviewTab = activePreview?.tab || 'content';
 
-  // Bottom section: show related and info together (Backlinks removed)
+  // Related pages (simple heuristic): children and siblings of current page
   const [related, setRelated] = useState<Box[]>([]);
-  // Sub pages for fallback when CONTENT has no visible lines
   const [subpages, setSubpages] = useState<Box[]>([]);
-  // Flag: showing deeper descendants because no direct children exist
   const [subpagesDeeper, setSubpagesDeeper] = useState<boolean>(false);
-  // Favorites for sidebarBox
   const [favorites, setFavorites] = useState<Box[]>([]);
-  // Favorites list at bottom of left cards pane
   const [leftFavorites, setLeftFavorites] = useState<Box[]>([]);
-
   useEffect(() => {
     const loadRelated = async () => {
       const name = sidebarBox?.name;
-  // journalRelated 機能停止中
       if (!name || !currentGraph) { setRelated([]); return; }
       try {
         const boxes = await db.box.where('graph').equals(currentGraph).toArray();
-        let tokens = name.split(/[\s/_]+/).map(s => s.toLowerCase()).filter(s => s.length >= 2);
-        // ジャーナルなら 年, 年_月, 年_月_日 もトークンへ追加
-        const jMatch = name.match(/^(?:journals\/)?(\d{4})[_-]?(\d{2})[_-]?(\d{2})$/);
-        if (jMatch) {
-          const y = jMatch[1]; const m = jMatch[2]; const d = jMatch[3];
-          // Year 単体はノイズになりやすいので除外し、年月・年月日トークンのみ
-          tokens = Array.from(new Set([...tokens.filter(t => !/^\d{4}$/.test(t)), `${y}_${m}`, `${y}_${m}_${d}`]));
+        const rel: Box[] = [];
+        // children
+        const childPrefix = name + '/';
+        for (const b of boxes) {
+          if (b.name !== name && b.name.startsWith(childPrefix)) rel.push(b);
         }
-        let rel = boxes.filter(b => b.name !== name && tokens.some(t => b.name.toLowerCase().includes(t.toLowerCase())));
-        // ジャーナル特別: 同じ年月の他ジャーナルを強制追加
-        if (jMatch) {
-          const y = jMatch[1]; const m = jMatch[2]; const d = jMatch[3];
-          const dateFrom = (b: Box) => {
-            const m2 = b.name.match(/^(?:journals\/)?(\d{4})[_-]?(\d{2})[_-]?(\d{2})$/);
-            if (!m2) return null;
-            return new Date(`${m2[1]}-${m2[2]}-${m2[3]}`);
-          };
-          const currentDate = new Date(`${y}-${m}-${d}`);
-          const allJournals = boxes.filter(b => /^(?:journals\/)?\d{4}[_-]?\d{2}[_-]?\d{2}$/.test(b.name));
-          // prev / next
-          const earlier = allJournals.filter(b => b.name !== name).filter(b => (dateFrom(b)! < currentDate)).sort((a,b)=> dateFrom(b)! > dateFrom(a)! ? 1 : -1);
-          const later = allJournals.filter(b => b.name !== name).filter(b => (dateFrom(b)! > currentDate)).sort((a,b)=> dateFrom(a)! > dateFrom(b)! ? 1 : -1);
-          const prev = earlier.length ? earlier[earlier.length - 1] : undefined;
-            const next = later.length ? later[0] : undefined;
-          // nearby ±7 日
-          const dayMs = 86400000;
-          const nearby = allJournals.filter(b => b.name !== name).filter(b => {
-            const dt = dateFrom(b)!; const diff = Math.round((dt.getTime() - currentDate.getTime())/dayMs);
-            return Math.abs(diff) <= 7 && diff !== 0;
-          }).sort((a,b)=> b.time - a.time);
-          const usedSet = new Set<string>();
-          if (prev) usedSet.add(prev.name);
-          if (next) usedSet.add(next.name);
-          for (const b of nearby) usedSet.add(b.name);
-          // sameMonth 集計は journalRelated 無効化により未使用のため削除
-          // journalRelated 機能停止中: 近接ジャーナルを通常relatedへ加えるのみ
-          rel = [...rel, ...nearby];
-        }
-
-        // CONTENTタブを表示中は、本文内に出現する [[Page]] と一致するものを除外
-        if (sidebarTab === 'content' && Array.isArray(sidebarBlocks)) {
-          const linked = new Set<string>();
-          const visit = (bs: any[]) => {
-            for (const b of bs) {
-              // LOGBOOK などは blockText.ts 側利用関数へ統合済: ここでは raw content 直接使用
-              const raw = (b.content ?? '');
-              const lines = raw.split('\n');
-              for (const line of lines) {
-                const regex = /\[\[([^\]]+)\]\]/g;
-                let m: RegExpExecArray | null;
-                while ((m = regex.exec(line)) !== null) {
-                  linked.add((m[1] || '').toLowerCase());
-                }
-              }
-              if (b.children && b.children.length) visit(b.children);
+        // siblings (same parent folder)
+        const lastSlash = name.lastIndexOf('/');
+        if (lastSlash > 0) {
+          const parentPrefix = name.slice(0, lastSlash + 1);
+          for (const b of boxes) {
+            if (b.name !== name && b.name.startsWith(parentPrefix)) {
+              const rest = b.name.slice(parentPrefix.length);
+              if (rest.length > 0 && !rest.includes('/')) rel.push(b);
             }
-          };
-          visit(sidebarBlocks as any[]);
-          if (linked.size > 0) {
-            rel = rel.filter(b => !linked.has(b.name.toLowerCase()));
           }
         }
-
-        setRelated(rel.slice(0, 30));
-      } catch {
-        setRelated([]);
-      }
+        // dedupe and cap
+        const seen = new Set<string>();
+        const unique = rel.filter(b => { const k = `${b.graph}::${b.name}`; if (seen.has(k)) return false; seen.add(k); return true; });
+        setRelated(unique.slice(0, 30));
+      } catch { setRelated([]); }
     };
-  loadRelated();
-  }, [sidebarBox?.name, currentGraph, sidebarTab, sidebarBlocks]);
+    loadRelated();
+  }, [sidebarBox?.name, currentGraph]);
 
   // Load sub pages (children under current page path) for fallback view
   useEffect(() => {
@@ -1204,7 +1197,7 @@ function App() {
       const name = sidebarBox?.name;
       if (!name || !currentGraph) { setSubpages([]); setSubpagesDeeper(false); return; }
       try {
-        // ジャーナルの場合: 同じ月の他ジャーナルを "sub pages" として表示
+        // Journals: show same-month entries as "sub pages"
         const jMatch = name.match(/^(?:journals\/)?(\d{4})[_-]?(\d{2})[_-]?(\d{2})$/);
         if (jMatch) {
           const y = jMatch[1]; const m = jMatch[2];
@@ -1222,7 +1215,6 @@ function App() {
           .where('graph').equals(currentGraph)
           .and(b => b.name.startsWith(name + '/'))
           .toArray();
-        // Keep only immediate children: parent/child (no further '/')
         const prefix = name + '/';
         const oneLevel = items.filter(b => {
           const rest = b.name.slice(prefix.length);
@@ -1232,18 +1224,14 @@ function App() {
           setSubpages(oneLevel);
           setSubpagesDeeper(false);
         } else if (items.length > 0) {
-          // Fallback: no direct children, but deeper descendants exist -> show them with notice
-          // Optionally limit count to avoid overflow
-            const limited = items.slice(0, 80);
+          const limited = items.slice(0, 80);
           setSubpages(limited);
           setSubpagesDeeper(true);
         } else {
           setSubpages([]);
           setSubpagesDeeper(false);
         }
-      } catch {
-        setSubpages([]); setSubpagesDeeper(false);
-      }
+      } catch { setSubpages([]); setSubpagesDeeper(false); }
     };
     loadSub();
   }, [sidebarBox?.name, currentGraph]);
@@ -1401,7 +1389,7 @@ function App() {
         const [, y, m, d] = journalMatch;
         try {
           const dt = new Date(Number(y), Number(m) - 1, Number(d));
-          return formatDateByPattern(dt, journalTitleFormat);
+      return formatDateByPattern(dt, journalDatePattern);
         } catch {
           return `${y}/${m}/${d}`;
         }
@@ -1423,6 +1411,8 @@ function App() {
       return `${day} ${weekday}`; // 例: 13 Tue (ロケールにより Tue / 火 など)
     } catch { return displayTitle(name); }
   };
+
+  // toJournalPageNameIfDate は BlockList 内で使用するため、関数自体はモジュールスコープ版を下部に定義。
 
   // フォルダモードでページ名からファイル(File)を特定
   const locateFolderModeFile = useCallback(async (pageName: string): Promise<{ file: File; picked: string } | null> => {
@@ -1689,10 +1679,16 @@ function App() {
   <div className='content'>
         <Dialog open={globalSettingsOpen} onClose={()=> setGlobalSettingsOpen(false)} maxWidth='sm' fullWidth>
           <DialogTitle style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
-            <span>Plugin UI Settings</span>
+            <span>Plugin Settings</span>
             <Button size='small' variant='outlined' onClick={resetUiFont}>Reset</Button>
           </DialogTitle>
           <DialogContent dividers>
+            {/* Date formats */}
+            <div style={{display:'flex',flexWrap:'wrap',gap:16,marginBottom:20}}>
+              <TextField size='small' label={t('journal-date-format-label') || 'Journal Date Format'} value={journalDatePattern} onChange={e=> { const v = e.target.value.trim() || 'yyyy/MM/dd'; setJournalDatePattern(v); }} helperText={t('journal-date-format-help') || 'Tokens: yyyy MM dd'} style={{width:240}} />
+              <TextField size='small' label={t('journal-link-format-label') || 'Journal Link Format'} value={journalLinkPattern} onChange={e=> { const v = e.target.value.trim() || 'yyyy/MM/dd'; setJournalLinkPattern(v); }} helperText={t('journal-link-format-help') || 'For parsing links: yyyy MM dd'} style={{width:260}} />
+            </div>
+            {/* Font related settings */}
             <div style={{display:'flex',flexWrap:'wrap',gap:16}}>
               <TextField size='small' type='number' label='Font Size' value={uiFontSize} onChange={e=>{const v=parseInt(e.target.value,10); if(!isNaN(v)&&v>=8&&v<=40) setUiFontSize(v);}} style={{width:120}} />
               <TextField size='small' type='number' label='Line Height' value={uiLineHeight} onChange={e=>{const v=parseFloat(e.target.value); if(!isNaN(v)&&v>=1&&v<=3) setUiLineHeight(v);}} style={{width:140}} />
@@ -1708,18 +1704,15 @@ function App() {
             <div style={{marginTop:16,padding:10,border:'1px solid #ddd',borderRadius:6,background:'#fafafa'}}>
               <div style={{fontSize:12,opacity:.65,marginBottom:6}}>Preview</div>
               <div style={{fontFamily: uiFontFamily?`'${uiFontFamily}', system-ui, sans-serif`:'system-ui, sans-serif', fontSize:uiFontSize, lineHeight:uiLineHeight, fontWeight:uiFontWeight}}>
-                The quick brown fox jumps over the lazy dog / 迅速な茶色の狐が怠惰な犬を飛び越える 0123456789
+                {t('sample-text')}
               </div>
             </div>
-            <div style={{marginTop:16,fontSize:11,opacity:.7,lineHeight:1.4}}>
-              メモ: Google Fonts でウェイト未提供の値を指定すると自動で近いウェイトで表示されます。
-            </div>
+            <div style={{marginTop:16,fontSize:11,opacity:.7,lineHeight:1.4}}>{t('note-fonts')}</div>
           </DialogContent>
           <DialogActions>
-            <Button onClick={()=> setGlobalSettingsOpen(false)} autoFocus>Close</Button>
+            <Button onClick={()=> setGlobalSettingsOpen(false)} autoFocus>{t('close')}</Button>
           </DialogActions>
         </Dialog>
-  {/* 設定ダイアログ削除 */}
         <div className='left-pane'>
           <div id='tile' ref={tileRef} tabIndex={2}>{boxElements}</div>
           <div className='left-favorites'>
@@ -1821,6 +1814,8 @@ function App() {
                   <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={stripPageBrackets} onChange={(_, v) => setStripPageBrackets(v)} />} label={t('toggle-strip-page-brackets') || 'Strip [[ ]]'} />
                   <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={!hidePageRefs} onChange={(_, v) => setHidePageRefs(!v)} />} label={t('toggle-page-links') || t('toggle-hide-page-refs') || 'Page links'} />
                   <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={hideQueries} onChange={(_, v) => setHideQueries(v)} />} label={t('toggle-hide-queries') || 'Hide queries'} />
+                  <Tooltip title={t('toggle-remove-macros-help') || 'Remove {{macro ...}} constructs (except queries unless hidden)'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={removeMacros} onChange={(_, v) => setRemoveMacros(v)} />} label={t('toggle-remove-macros') || 'Remove macros'} /></span></Tooltip>
+                  <Tooltip title={t('toggle-normalize-tasks-help') || 'Convert TODO/DONE etc. to Markdown checkboxes'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={normalizeTasks} onChange={(_, v) => setNormalizeTasks(v)} />} label={t('toggle-normalize-tasks') || 'Normalize tasks'} /></span></Tooltip>
                 </div>}
                 {showSidebarSettings && <div className='sidebar-row sidebar-row--options'>
                   <TextField size='small' label={t('always-hide-props')} placeholder={t('always-hide-props-ph')} value={alwaysHidePropKeys} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { const v = e.target.value; setAlwaysHidePropKeys(v); try { localStorage.setItem('alwaysHideProps', v); } catch {} }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px' }} />
@@ -1846,9 +1841,14 @@ function App() {
                             .replace(/\[\[([^\]]+)\]\[([^\]]*)\]\]/g, (_, u, txt) => txt || u);
                         }
                         if (hideQueries) text = text.replace(/\{\{\s*query[^}]*\}\}/ig,'');
+                        if (removeMacros) text = removeMacroTokens(text, true, hideQueries);
                         if (removeStrings.length) {
                           for (const rs of removeStrings) if (rs) text = text.split(rs).join('');
                         }
+                        if (normalizeTasks) text = normalizeTaskLines(text, true);
+                        text = text.replace(/\n{2,}/g,'\n').replace(/ +/g,' ').trim();
+                      } else {
+                        if (normalizeTasks) text = normalizeTaskLines(text, true);
                         text = text.replace(/\n{2,}/g,'\n').replace(/ +/g,' ').trim();
                       }
                       try {
@@ -1857,6 +1857,7 @@ function App() {
                         logseq.UI.showMsg(t('copied'));
                       } catch (e) { console.error(e); logseq.UI.showMsg(t('copy-failed')); }
                     }}>{t('copy-content')}</Button>
+                    {/* Create Page button removed */}
                     {(!detachedMode && sidebarBox && sidebarBox.graph === currentGraph) && <Button size='small' variant='outlined' onClick={() => { if (!sidebarBox) return; logseq.App.pushState('page', { name: sidebarBox.name }); logseq.hideMainUI({ restoreEditingCursor: true }); }}>{t('open-in-logseq')}</Button>}
                     <IconButton size='small' onClick={closeActivePreview} title={t('close')}><Clear fontSize='small' /></IconButton>
                   </div>
@@ -1889,8 +1890,8 @@ function App() {
                         <div className={'sidebar-main-text' + (copyHover ? ' copy-target-hover' : '')}>
                           {sidebarLoading ? <div className='sidebar-loading'>{t('loading-content')}</div> : sidebarTab === 'content' ? (() => {
                             const has = hasRenderableContent((sidebarBlocks || []) as BlockNode[], hideProperties, true, alwaysHideKeys, hidePageRefs, hideQueries, removeStrings);
-                            return (<>{has ? <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={currentGraph.startsWith('fs_')} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} /> : <div className='sidebar-empty'>{t('no-content')}</div>}</>);
-                          })() : sidebarTab === 'nomark' ? <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={currentGraph.startsWith('fs_')} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} /> : sidebarTab === 'outline' ? <RawCustomView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} folderMode={currentGraph.startsWith('fs_')} /> : null}
+                            return (<>{has ? <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={currentGraph.startsWith('fs_')} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} journalLinkPattern={journalLinkPattern} /> : <div className='sidebar-empty'>{t('no-content')}</div>}</>);
+                          })() : sidebarTab === 'nomark' ? <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={currentGraph.startsWith('fs_')} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} /> : sidebarTab === 'outline' ? <RawCustomView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} folderMode={currentGraph.startsWith('fs_')} normalizeTasks={normalizeTasks} /> : null}
                         </div>
                       </div>
             {subpagesPresent && <div className='sidebar-pane sidebar-pane-subpages' style={{ flex: subFlex }} onMouseEnter={() => setHoveredSidePane('sub')} onMouseLeave={() => setHoveredSidePane(p => p === 'sub' ? null : p)}>
@@ -1915,6 +1916,8 @@ function App() {
         </aside>
       </div>
       <div className='footer'>{t('footer')}</div>
+  {/* (Create Page Dialog removed) */}
+      
     </>
   );
 }
@@ -1979,8 +1982,63 @@ function isForcedHiddenPropLine(line: string, alwaysHideKeys: string[]): boolean
   return alwaysHideKeys.includes(k);
 }
 
-const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; currentGraph?: string; onOpenPage?: (name: string) => void; folderMode?: boolean; stripPageBrackets?: boolean; hidePageRefs?: boolean; hideQueries?: boolean; assetsDirHandle?: FileSystemDirectoryHandle; removeStrings?: string[] }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], currentGraph, onOpenPage, folderMode, stripPageBrackets, hidePageRefs, hideQueries, assetsDirHandle, removeStrings = [] }) => {
+// ===== ジャーナルリンク判定ユーティリティ =====
+function normalizeDigits(s: string): string {
+  return s.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFF10 + 48));
+}
+function parseDateByPattern(text: string, pattern: string): { y: number; m: number; d: number } | null {
+  if (!text || !pattern) return null;
+  const t = normalizeDigits(String(text).trim());
+  const p = String(pattern).trim();
+  // Escape regex meta chars and replace tokens
+  const esc = p.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const order: Array<'yyyy' | 'MM' | 'dd'> = [];
+  const reStr = esc.replace(/yyyy|MM|dd/g, (m: any) => {
+    order.push(m);
+    if (m === 'yyyy') return '(\\d{4})';
+    return '(\\d{1,2})';
+  });
+  const re = new RegExp('^\\s*' + reStr + '\\s*$');
+  const m = re.exec(t);
+  if (!m) return null;
+  let y = 0, M = 0, d = 0;
+  for (let i = 0; i < order.length; i++) {
+    const v = parseInt(m[i + 1], 10);
+    if (order[i] === 'yyyy') y = v; else if (order[i] === 'MM') M = v; else d = v;
+  }
+  if (!(y && M && d)) return null;
+  if (M < 1 || M > 12) return null;
+  if (d < 1 || d > 31) return null;
+  const dt = new Date(y, M - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== M - 1 || dt.getDate() !== d) return null;
+  return { y, m: M, d };
+}
+function toJournalPageNameIfDateUsing(pattern: string, s: string): string | null {
+  const r = parseDateByPattern(s, pattern);
+  if (!r) return null;
+  const y = String(r.y).padStart(4, '0');
+  const m = String(r.m).padStart(2, '0');
+  const d = String(r.d).padStart(2, '0');
+  return `${y}_${m}_${d}`;
+}
+
+const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; currentGraph?: string; onOpenPage?: (name: string) => void; folderMode?: boolean; stripPageBrackets?: boolean; hidePageRefs?: boolean; hideQueries?: boolean; assetsDirHandle?: FileSystemDirectoryHandle; removeStrings?: string[]; normalizeTasks?: boolean; journalLinkPattern?: string }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], currentGraph, onOpenPage, folderMode, stripPageBrackets, hidePageRefs, hideQueries, assetsDirHandle, removeStrings = [], normalizeTasks = false, journalLinkPattern }) => {
   const { t } = useTranslation();
+  const normalizeTaskLinesLocal = (text: string, enable: boolean) => {
+    if (!enable) return text;
+    const statusRe = /^(\s*)([-*+]\s+)?(TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS|HABIT|START|STARTED|DONE|CANCELED|CANCELLED)\s+/i;
+    return text.split('\n').map(line => {
+      if (/^\s*```/.test(line)) return line;
+      const m = line.match(statusRe);
+      if (!m) return line;
+      if (/^\s*[-*+]\s+\[[ xX-]\]/.test(line)) return line;
+      const status = (m[3]||'').toUpperCase();
+      const done = /DONE/.test(status);
+      const cancel = /CANCEL/.test(status);
+      const box = done ? '[x]' : (cancel ? '[-]' : '[ ]');
+      return line.replace(statusRe, `${m[1]||''}${m[2]||''}${box} `);
+    }).join('\n');
+  };
   if (!blocks || blocks.length === 0) return <div className='sidebar-empty'>{t('no-content')}</div>;
   const [assetUrls, setAssetUrls] = useState<Record<string,string>>({});
   const pendingRef = useRef<Set<string>>(new Set());
@@ -2055,7 +2113,10 @@ const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideR
     while ((m = regex.exec(line)) !== null) {
   const before = line.slice(lastIndex, m.index);
       if (before) withLinks.push(before);
-      const name = m[1];
+  let name = m[1];
+  // 入力書式が日付ならジャーナルページ名に変換
+  const j = journalLinkPattern ? toJournalPageNameIfDateUsing(journalLinkPattern, name) : null;
+  if (j) name = j;
       // If content looks like a URL, don't treat as page ref here; keep raw for external link pass
       const looksUrl = /(^|\s)([a-zA-Z]+:\/\/|www\.)/.test(name);
       if (looksUrl) {
@@ -2118,7 +2179,9 @@ const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideR
         if (start > cursor) withMdLinks.push(chunk.slice(cursor, start));
         if (next.type === 'md') {
           const text = next.m[1];
-          const href = next.m[2];
+          let href = next.m[2];
+          const j = journalLinkPattern ? toJournalPageNameIfDateUsing(journalLinkPattern, href) : null;
+          if (j) href = j;
           // Asset link (relative to ../assets) -> always external style anchor with object URL if available
           if (href.startsWith('../assets/')) {
             const assetHref = getAssetUrl(href) || href;
@@ -2151,7 +2214,9 @@ const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideR
           }
           cursor = start + next.m[0].length;
         } else {
-          const url = next.m[1];
+          let url = next.m[1];
+          const j2 = journalLinkPattern ? toJournalPageNameIfDateUsing(journalLinkPattern, url) : null;
+          if (j2) url = j2;
           const text = next.m[2] || next.m[1];
           if (url.startsWith('../assets/')) {
             const assetHref = getAssetUrl(url) || url;
@@ -2394,15 +2459,17 @@ const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideR
                     .replace(/\{\{\s*embed\s*\[\[[^\]]+\]\]\s*\}\}/gi, '')
                     .replace(/\s+/g, ' ') // collapse whitespace
                     .trim();
+                  if (normalizeTasks) processed = normalizeTaskLinesLocal(processed, true);
                   if (processed.length === 0) return null; // drop line if becomes empty
                   return renderLine(processed, idx);
                 }
                 if (processedLine.trim().length === 0) return null;
-                return renderLine(processedLine, idx);
+                const normalized = normalizeTasks ? normalizeTaskLinesLocal(processedLine, true) : processedLine;
+                return renderLine(normalized, idx);
               })}
             </div>
             {b.children && b.children.length > 0 && (
-              <BlockList blocks={b.children as BlockNode[]} hideProperties={hideProperties} hideReferences={hideReferences} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={onOpenPage} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} />
+              <BlockList blocks={b.children as BlockNode[]} hideProperties={hideProperties} hideReferences={hideReferences} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={onOpenPage} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} journalLinkPattern={journalLinkPattern} />
             )}
           </li>
         );

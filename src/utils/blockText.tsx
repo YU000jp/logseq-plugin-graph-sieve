@@ -134,7 +134,22 @@ export function outlineTextFromBlocks(blocks: BlockNode[], opts: { hidePropertie
   return lines.join('\n');
 }
 
-export const RawCustomView: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; stripPageBrackets?: boolean; hideQueries?: boolean; removeStrings?: string[]; folderMode?: boolean }> = ({ blocks, hideProperties = false, hideReferences = false, alwaysHideKeys = [], stripPageBrackets = false, hideQueries = false, removeStrings = [], folderMode = false }) => {
+export const RawCustomView: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; stripPageBrackets?: boolean; hideQueries?: boolean; removeStrings?: string[]; folderMode?: boolean; normalizeTasks?: boolean }> = ({ blocks, hideProperties = false, hideReferences = false, alwaysHideKeys = [], stripPageBrackets = false, hideQueries = false, removeStrings = [], folderMode = false, normalizeTasks = false }) => {
+  const normalizeTaskLinesLocal = (text: string, enable: boolean) => {
+    if (!enable) return text;
+    const statusRe = /^(\s*)([-*+]\s+)?(TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS|HABIT|START|STARTED|DONE|CANCELED|CANCELLED)\s+/i;
+    return text.split('\n').map(line => {
+      if (/^\s*```/.test(line)) return line;
+      const m = line.match(statusRe);
+      if (!m) return line;
+      if (/^\s*[-*+]\s+\[[ xX-]\]/.test(line)) return line;
+      const status = (m[3]||'').toUpperCase();
+      const done = /DONE/.test(status);
+      const cancel = /CANCEL/.test(status);
+      const box = done ? '[x]' : (cancel ? '[-]' : '[ ]');
+      return line.replace(statusRe, `${m[1]||''}${m[2]||''}${box} `);
+    }).join('\n');
+  };
   let text = flattenBlocksToText(blocks, hideProperties, hideReferences, 0, alwaysHideKeys, folderMode, removeStrings);
   if (stripPageBrackets) {
     text = text.replace(/\[\[([^\]]+)\]\]/g,'$1')
@@ -142,6 +157,7 @@ export const RawCustomView: React.FC<{ blocks: BlockNode[]; hideProperties?: boo
       .replace(/\[\[([^\]]+)\]\[([^\]]*)\]\]/g, (_, u, txt) => txt || u);
   }
   if (hideQueries) text = text.replace(/\{\{\s*query[^}]*\}\}/ig,'');
+  if (normalizeTasks) text = normalizeTaskLinesLocal(text, true);
   text = text.split('\n').filter(l => !/^\s*-\s*-\s*$/.test(l) && l.trim().length > 0).join('\n');
   if (!text.trim()) {
     const { t } = useTranslation();

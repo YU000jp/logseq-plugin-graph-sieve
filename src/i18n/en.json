@@ -47,5 +47,15 @@
     "remove-strings": "Remove strings",
     "remove-strings-ph": "e.g. draft,TODO,foo",
     "raw-toggle-full": "Full source",
-    "raw-toggle-summary": "Summary"
+    "raw-toggle-summary": "Summary",
+    "sample-text": "The quick brown fox jumps over the lazy dog 0123456789",
+    "note-fonts": "Note: If a weight not provided by Google Fonts is specified, a nearby available weight will be used automatically."
+    ,"journal-date-format-label": "Journal date format"
+    ,"journal-date-format-help": "Tokens: yyyy MM dd (default yyyy/MM/dd)"
+    ,"journal-link-format-label": "Journal link format (parse)"
+    ,"journal-link-format-help": "Used to parse links like 2023/01/17; tokens: yyyy MM dd"
+    ,"toggle-remove-macros": "Remove macros"
+    ,"toggle-normalize-tasks": "Normalize tasks"
+    ,"toggle-remove-macros-help": "Remove non-query macros like {{renderer ...}} or custom macros"
+    ,"toggle-normalize-tasks-help": "Convert task keywords (TODO, DOING, DONE, LATER, NOW, WAITING, CANCELLED) to markdown checkboxes"
 }

@@ -46,5 +46,15 @@
     "remove-strings": "文字列除去",
     "remove-strings-ph": "例: 下書き,TODO,foo",
     "raw-toggle-full": "フルソース",
-    "raw-toggle-summary": "要約"
+    "raw-toggle-summary": "要約",
+    "sample-text": "The quick brown fox jumps over the lazy dog / 迅速な茶色の狐が怠惰な犬を飛び越える 0123456789",
+    "note-fonts": "メモ: Google Fonts でウェイト未提供の値を指定すると自動で近いウェイトで表示されます。"
+    ,"journal-date-format-label": "ジャーナル日付フォーマット"
+    ,"journal-date-format-help": "トークン: yyyy MM dd (初期値 yyyy/MM/dd)"
+    ,"journal-link-format-label": "ジャーナルリンクの書式（解析用）"
+    ,"journal-link-format-help": "2023/01/17 のようなリンクを解析。トークン: yyyy MM dd"
+    ,"toggle-remove-macros": "マクロ除去"
+    ,"toggle-normalize-tasks": "タスク一般化"
+    ,"toggle-remove-macros-help": "{{renderer ...}} 等のクエリ以外のマクロや独自マクロを除去"
+    ,"toggle-normalize-tasks-help": "TODO / DOING / DONE / LATER / NOW / WAITING / CANCELLED をMarkdownチェックボックスへ変換"
 }
