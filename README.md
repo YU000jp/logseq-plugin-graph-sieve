@@ -21,7 +21,8 @@ Graph Sieve focuses on three things:
 It is a feature‑extended derivative of the CardBox plugin with a reworked internal structure and settings model.
 
 ## Usage
-1. Launch (toolbar icon).
+1. Launch from the Logseq toolbar icon.
+   > Remains hidden by default
 2. Close with `Esc` or by clicking outside.
 3. On launch you see a card list for the current graph.  
   > Use the button on the right side to switch to Folder Mode.
