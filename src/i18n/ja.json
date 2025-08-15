@@ -1,7 +1,7 @@
 {
     "footer": "本文のないページは表示されません。クリックまたはカーソル移動+Enterキーで開きます。",
     "loading": "構築中...",
-    "please-select-pages": "pagesという名前のフォルダを選択してください。",
+    "please-select-pages": "Logseqのグラフ用フォルダを選択してください（中に 'pages' が必要です）。",
     "filter-by-page-name": "ページ名で絞り込み",
     "cancel": "キャンセル",
     "tab-content": "内容",
@@ -38,7 +38,7 @@
     "toggle-normalize-tasks": "タスク一般化",
     "toggle-remove-macros-help": "{{renderer ...}} 等のクエリ以外のマクロや独自マクロを除去",
     "toggle-normalize-tasks-help": "TODO / DOING / DONE / LATER / NOW / WAITING / CANCELLED をMarkdownチェックボックスへ変換",
-    "mode-choose-folder-desc": "フォルダモード: Logseqなしで閲覧するために pages フォルダを選択します。",
+    "mode-choose-folder-desc": "フォルダモード: Logseqなしで閲覧するためにグラフ用フォルダ（'pages' を含む）を選択します。",
     "mode-choose-folder-btn": "フォルダ モード",
     "settings": "設定"
 }

@@ -1,55 +1,60 @@
+# Logseq Graph Sieve Plugin
 <div align="center">
 
-# Logseq Graph Sieve Plugin
+Helper tool to extract and normalize plain text from a file‑based graph’s `pages` and `journals` folders using a simple card + preview interface.
 
-Helper tool to extract plain text from pages in your current graph or from an "old" graph folder (read‑only) using a simple card + preview interface.
-
-Logseq mode: load the currently opened file‑based graph.  
-Folder mode: load an external (old) graph folder for read‑only plain text extraction.
+Currently supports Folder Mode only (Logseq Mode has been removed).
 
 </div>
 
 [日本語](./README.ja.md) | English
 
 ## What is it?
-Graph Sieve focuses on three things:
+Graph Sieve combines page discovery and normalization in one screen:
 
-- Switch between the active Logseq graph and any read‑only folder (Folder Mode)
-- Clean / normalize text: remove properties, refs, embeds, blank lines, [[Page]] brackets, page refs
-- Additional normalization: always‑hide property keys, arbitrary string removal (removeStrings), hide query blocks
+- Folder Mode (read‑only): choose your Logseq graph folder and browse pages without running Logseq
+- Remove/normalize: properties, page refs, query blocks, renderers, [[Page]] brackets
+- Extra normalization: always‑hide property keys, arbitrary string removal, task normalization, macro removal
+- Helpful extras: preview tabs, related/sub‑pages, tab management, favorites
 
-It is a feature‑extended derivative of the CardBox plugin with a reworked internal structure and settings model.
+It’s a feature‑extended derivative of the CardBox plugin with a redesigned internal structure and settings model.
 
 ## Usage
 1. Launch from the Logseq toolbar icon.
-   > Remains hidden by default
-2. Close with `Esc` or by clicking outside.
-3. On launch you see a card list for the current graph.  
-  > Use the button on the right side to switch to Folder Mode.
-4. Click a card to open it in the right‑hand preview (a tab opens).
-5. Inside a tab you can switch view type, copy text, open in Logseq, or create a new page in Logseq from the content.
+  > The icon may be hidden by default
+2. Choose a folder
+  - Click “Folder Mode” and select your graph’s root folder (it must contain a `pages` directory)
+3. Work with cards
+  - Empty pages aren’t listed
+  - Click or move selection and press Enter to open a page in the right‑hand preview (opens as a tab)
+4. In a tab
+  - Switch view type (Content / No Markdown / RAW)
+  - Copy content, close all tabs, etc.
 
-## Preview Tab Types
-- Content: Rendered style blocks (with property / ref hiding applied)
-- No Markdown: Plain text with markup stripped
-- Raw: Original markdown (after removal of Logseq‑specific artifacts)
+## Preview tab types
+- Content: Logseq‑like rendering (with property/ref hiding applied)
+- No Markdown: Plain text with markup removed
+- RAW: Processed raw markdown
 
-## Text Cleanup Options
-| Option | Purpose |
-|--------|---------|
-| Hide properties | Remove properties from rendered output |
-| Always hide properties | Comma separated property keys to always hide |
-| Strip [[...]] brackets | [[Page Title]] → Page Title |
-| Remove page refs | Show plain text (no link) |
-| Hide query blocks | Remove {{query ...}} blocks |
-| String removal (removeStrings) | Delete listed substrings from body & copy output |
+## Text formatting / display options
+Settings are persisted to localStorage.
 
-Settings persist in localStorage.
+- Hide properties
+- Always hide properties (comma‑separated keys)
+- Strip [[ ]] brackets ([[Page Title]] → Page Title)
+- Enable page links
+- Hide page refs
+- Hide queries ({{query ...}})
+- Hide renderers (e.g., {{renderer ...}})
+- Remove macros (non‑query/custom macros)
+- Normalize tasks (TODO/DOING/DONE… → Markdown checkboxes)
+- Remove strings (filter substrings from body and copy output)
 
 ## Limitations / Notes
-- Folder Mode cannot fully reproduce Logseq hierarchy / metadata.
-- Whiteboards / temporary in‑progress files are ignored.
-- Formatting may differ slightly from native Logseq rendering.
+- Logseq Mode has been removed. Only Folder Mode (reading a graph folder) is supported.
+- Folder Mode does not fully reproduce Logseq’s hierarchy/metadata.
+- Whiteboards and temporary in‑progress files are ignored.
+- Some formatting may differ slightly from Logseq’s native rendering.
 
 ## Credits
 - Based on / inspired by: [CardBox](https://github.com/sosuisen/logseq-cardbox) by [sosuisen](https://github.com/sosuisen)  [<img align="right" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="30"/>](https://www.buymeacoffee.com/hidekaz)

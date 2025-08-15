@@ -1,7 +1,7 @@
 {
     "footer": "Empty pages are not displayed. Click or move the cursor and press Enter to open the page.",
     "loading" : "Building...",
-    "please-select-pages": "Select the folder named 'pages'",
+    "please-select-pages": "Select your Logseq graph folder (must contain 'pages')",
     "filter-by-page-name": "Filter by Page Name",
     "cancel": "Cancel",
     "tab-content": "Content",
@@ -38,7 +38,7 @@
     "toggle-normalize-tasks": "Normalize tasks",
     "toggle-remove-macros-help": "Remove non-query macros like {{renderer ...}} or custom macros",
     "toggle-normalize-tasks-help": "Convert task keywords (TODO, DOING, DONE, LATER, NOW, WAITING, CANCELLED) to markdown checkboxes",
-    "mode-choose-folder-desc": "Folder Mode: Pick a pages folder to browse without Logseq.",
+    "mode-choose-folder-desc": "Folder Mode: Pick your Logseq graph folder (with 'pages') to browse without Logseq.",
     "mode-choose-folder-btn": "Folder Mode",
     "settings": "Settings"
 }
