@@ -304,8 +304,7 @@ function App() {
   }, [currentGraph, currentDirHandle, journalsDirHandle]);
 
   // excludeJournals 変更に伴う自動 Rebuild は廃止
-
-  useEffect(() => { void rebuildDB(); }, [rebuildDB]);
+  // リビルドはモード/グラフ変更時のエフェクトに統一（重複トリガ回避）
 
   // Logseq DB 変更監視は不要（フォルダ専用）
 
@@ -677,8 +676,13 @@ function App() {
 
   // (Backlinks removed)
 
+  const pickingRef = useRef(false);
   const openDirectoryPicker = useCallback(async () => {
-    const handle = await window.showDirectoryPicker();
+    if (pickingRef.current) return; // 二重起動防止
+    pickingRef.current = true;
+    setLoading(true);
+    const handle = await window.showDirectoryPicker().catch(() => null as any);
+    if (!handle) { pickingRef.current = false; setLoading(false); return; }
     let pagesHandle: FileSystemDirectoryHandle | null = null;
     let assetsHandle: FileSystemDirectoryHandle | null = null;
     let journalsHandle: FileSystemDirectoryHandle | null = null;
@@ -688,7 +692,7 @@ function App() {
     } else {
       // ルートと仮定し pages / journals / assets を探索
       try { pagesHandle = await handle.getDirectoryHandle('pages'); } catch { pagesHandle = null; }
-      if (!pagesHandle) { logseq.UI.showMsg(t('please-select-pages')); return; }
+  if (!pagesHandle) { logseq.UI.showMsg(t('please-select-pages')); pickingRef.current = false; setLoading(false); return; }
       try { journalsHandle = await handle.getDirectoryHandle('journals'); } catch { journalsHandle = null; }
       try { assetsHandle = await handle.getDirectoryHandle('assets'); } catch { assetsHandle = null; }
     }
@@ -710,7 +714,8 @@ function App() {
     dirHandles[syntheticId] = pagesHandle!;
   await boxService.removeByGraph(syntheticId);
     setCurrentGraph(syntheticId);
-  setCurrentDirHandle(pagesHandle!);
+    setCurrentDirHandle(pagesHandle!);
+    pickingRef.current = false;
   }, [currentGraph, t]);
 
   // Logseq モード選択は廃止
@@ -719,8 +724,10 @@ function App() {
     try {
       await openDirectoryPicker();
       setModeChosen(true);
+      // フォルダ選択直後にリビルドを明示実行（重複は useEffect 側で防止済み）
+      await rebuildDB();
     } catch {/* user cancelled or failed; keep dialog open */}
-  }, [openDirectoryPicker]);
+  }, [openDirectoryPicker, rebuildDB]);
 
   // モード切替は廃止
 

@@ -28,22 +28,23 @@ export async function rebuildDatabase(opts: RebuildOptions): Promise<void> {
 
   if (!currentGraph) return;
   const myToken = ++rebuildTokenRef.current;
+  // 明示的にローディング/ロックを開始
   setCardsUpdating(true);
+  setLoading(true);
   try {
     const isSynthetic = currentGraph.startsWith('fs_');
     if (!isSynthetic) {
       // 非 fs_ グラフはサポート対象外（フォルダ専用運用）
-      setLoading(false);
-      return;
+      return; // finally で lock は解除される
     }
-    if (!currentDirHandle) { setLoading(false); return; }
+    if (!currentDirHandle) { return; }
     try {
       // synthetic は丸ごと再構築
       await boxService.removeByGraph(currentGraph);
       const existingSet = new Set<string>();
       const processFile = async (dir: FileSystemDirectoryHandle, entryName: string) => {
         try {
-          if (rebuildTokenRef.current !== myToken) return;
+          if (rebuildTokenRef.current !== myToken) return; // 以降はキャンセル
           if (!/\.(md|org)$/i.test(entryName)) return;
           const base = entryName.replace(/\.(md|org)$/i, '');
           const pageName = decodeLogseqFileName(base);
@@ -62,7 +63,7 @@ export async function rebuildDatabase(opts: RebuildOptions): Promise<void> {
       // root entries
       // @ts-ignore
       for await (const [entryName, entry] of (currentDirHandle as any).entries()) {
-        if (rebuildTokenRef.current !== myToken) break;
+  if (rebuildTokenRef.current !== myToken) break;
         if (!entryName) continue;
         if (entry.kind === 'file') {
           await processFile(currentDirHandle, entryName);
@@ -93,7 +94,8 @@ export async function rebuildDatabase(opts: RebuildOptions): Promise<void> {
   } catch (e) {
     console.warn('rebuildDB failed', e);
   } finally {
-    if (rebuildTokenRef.current === myToken) setCardsUpdating(false);
-    setLoading(false);
+    // トークンが変わっていてもロックは確実に解除する
+    try { setCardsUpdating(false); } catch { /* ignore */ }
+    try { setLoading(false); } catch { /* ignore */ }
   }
 }
