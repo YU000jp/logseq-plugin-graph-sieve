@@ -11,7 +11,7 @@ import { useTileGridMeasure } from './hooks/useTileGridMeasure';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
 // block text utilities are now used inside PreviewPane; no direct use here
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Button, IconButton, InputAdornment, TextField, Switch, FormControlLabel, Tooltip, Chip, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+import { Button, IconButton, InputAdornment, TextField, Tooltip, Chip, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import { Clear } from '@mui/icons-material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { encodeLogseqFileName, getSummary, getSummaryFromRawText, parseOperation, decodeLogseqFileName } from './utils';
@@ -77,9 +77,9 @@ function App() {
   //  const appRef = useRef<HTMLDivElement | null>(null);
   const [tileColumnSize, setTileColumnSize] = useState<number>(0);
   const [tileRowSize, setTileRowSize] = useState<number>(0);
-  const [maxBoxNumber, setMaxBoxNumber] = useState<number>(50); // initial fetch size
-  // Exclude journals toggle (default true)
-  const [excludeJournals, setExcludeJournals] = useState<boolean>(() => getBoolean('excludeJournals', true));
+  // 段階的ロード用の上限（スクロール連動なしで徐々に拡張し最終的に全件へ）
+  const [maxBoxNumber, setMaxBoxNumber] = useState<number>(100);
+  // Exclude journals トグルは廃止
   // 自動デタッチモード: Logseq が現在開いているグラフとプラグインで扱うグラフが異なる場合 true
   const [detachedMode, setDetachedMode] = useState<boolean>(false);
   const [logseqCurrentGraph, setLogseqCurrentGraph] = useState<string>('');
@@ -230,17 +230,14 @@ function App() {
   useEffect(() => {
     try { (window as any).__graphSieveDetachedMode = detachedMode; } catch { /* ignore */ }
   }, [detachedMode]);
-  useEffect(() => { setBoolean('excludeJournals', excludeJournals); }, [excludeJournals]);
+  // excludeJournals 永続化は廃止
   // モード切替時にタブ / プレビューを全て閉じる
   useEffect(() => {
     setPreviews([]);
     setActivePreviewIndex(-1);
   }, [graphMode]);
 
-  // 初期ロードで maxBoxNumber が不足している場合のフェイルセーフ
-  useEffect(() => {
-    if (maxBoxNumber < 10) setMaxBoxNumber(50);
-  }, []);
+  // フェイルセーフの強制上書きは廃止（段階的拡張で対処）
 
   const cardboxes = useLiveQuery(
     () => {
@@ -248,10 +245,11 @@ function App() {
       if (graphMode === 'folder') {
         return (async () => {
           const all = await boxService.allByGraph(currentGraph);
-          // Sort desc by time and cap
+          // 時刻降順で並べ、現在の段階的上限で切る（後続エフェクトで自動拡張）
           return all.sort((a,b)=> b.time - a.time).slice(0, maxBoxNumber);
         })();
       }
+      // Logseq グラフ: 時刻降順で現在上限まで（後続エフェクトで自動拡張）
       if (detachedMode) return boxService.recentAll(maxBoxNumber);
       return boxService.recent(currentGraph, maxBoxNumber);
     },
@@ -264,7 +262,7 @@ function App() {
     (async () => { try { await rebuildDB(); } catch { /* ignore */ } })();
   }, [modeChosen, graphMode, currentGraph]);
   
-  // スクロールに応じて追加ロード（動的測定した行高を利用）
+  // スクロール連動は廃止済み。ここでは測定のみ。
   useTileGridMeasure({
     tileRef,
     tileGridHeight,
@@ -272,9 +270,37 @@ function App() {
     tileColumnSize,
     setTileColumnSize,
     tileRowSize,
-    setTileRowSize,
-    setMaxBoxNumber,
+  setTileRowSize,
   });
+
+  // メインカードを段階的に拡張ロード（UI 負荷を抑えつつ最終的に全件到達）
+  const expandScheduledRef = useRef(false);
+  useEffect(() => {
+    if (!cardboxes) return;
+    // 既に全体が上限未満なら（= これ以上増えない）終了
+    if (cardboxes.length < maxBoxNumber) return;
+    // 多重スケジュール抑止
+    if (expandScheduledRef.current) return;
+    const perScreen = Math.max(1, tileColumnSize * tileRowSize);
+    const chunk = Math.max(100, perScreen * 5); // 画面5枚分 or 最低100件ずつ
+    const next = maxBoxNumber + chunk;
+    expandScheduledRef.current = true;
+    const schedule = (cb: () => void) => {
+      const ric = (window as any).requestIdleCallback as (fn: Function, opts?: any) => number;
+      if (typeof ric === 'function') {
+        return ric(() => cb(), { timeout: 1000 });
+      }
+      return window.setTimeout(cb, 150);
+    };
+    const id = schedule(() => {
+      setMaxBoxNumber(next);
+      expandScheduledRef.current = false;
+    });
+    return () => {
+      // setTimeout のみキャンセル対象
+      if (typeof id === 'number') try { clearTimeout(id as unknown as number); } catch {}
+    };
+  }, [cardboxes?.length, tileColumnSize, tileRowSize, maxBoxNumber]);
 
   // Global ESC handling is included in keyboard navigation hook
 
@@ -315,15 +341,7 @@ function App() {
     });
   }, [currentGraph, currentDirHandle, journalsDirHandle, preferredFormat]);
 
-  // Rebuild automatically when excludeJournals changes
-  useEffect(() => {
-    if (!currentGraph) return;
-    (async () => {
-      setLoading(true);
-      await boxService.removeByGraph(currentGraph);
-      await rebuildDB();
-    })();
-  }, [excludeJournals, currentGraph, rebuildDB]);
+  // excludeJournals 変更に伴う自動 Rebuild は廃止
 
   useEffect(() => { void rebuildDB(); }, [rebuildDB]);
 
@@ -1054,10 +1072,8 @@ function App() {
     return cardboxes.filter(b => !isJournalName(b.name));
   }, [cardboxes]);
 
-  // excludeJournals が有効なら main list から journals を外す（下部セクション表示は継続）
-  // メイン一覧は常に非ジャーナルのみ
+  // メイン一覧は常に非ジャーナルのみ（ジャーナルは下部セクションへ）。
   const visibleMainBoxes = useMemo(() => {
-    const hasNonTrivialSummary = (box?: Box) => !!box && (box.summary || []).some(l => { const t=(l||'').trim(); return t && t !== '-'; });
     const q = pageName.trim().toLowerCase();
     const matchName = (b: Box) => {
       if (!q) return true;
@@ -1073,7 +1089,8 @@ function App() {
       }
       return false;
     };
-    return nonJournalBoxes.filter(b => hasNonTrivialSummary(b) && matchName(b));
+    // 除外解除: サマリ有無でのフィルタを廃止し、名称一致のみで表示
+    return nonJournalBoxes.filter(b => matchName(b));
   }, [nonJournalBoxes, pageName]);
 
   // 全体カウント: 空サマリ ('' だけ / '-' だけ) を除外し Journals とその他を分離
@@ -1191,9 +1208,7 @@ function App() {
               </div>
             );
           })()}
-          {graphMode !== 'folder' && (
-            <FormControlLabel style={{ marginLeft: 8, marginTop: 4 }} control={<Switch size='small' checked={excludeJournals} onChange={(_, v) => setExcludeJournals(v)} />} label={t('exclude-journals')} title={t('exclude-journals-hint') || ''} />
-          )}
+          {/* Exclude journals トグルは廃止 */}
           <Clear className='clear-btn' onClick={() => logseq.hideMainUI({ restoreEditingCursor: true })} style={{ cursor: 'pointer', float: 'right', marginTop: 10, marginRight: 24 }} />
         </div>
   </div>
@@ -1268,7 +1283,7 @@ function App() {
               />
             )}
           </div>
-          {(((graphMode === 'folder') || (!excludeJournals)) && journalBoxes.length > 0) && (
+          {(journalBoxes.length > 0) && (
             <div className={'left-journals' + (collapseJournals ? ' collapsed' : '')} onScroll={e => {
               const el = e.currentTarget;
               if (el.scrollTop + el.clientHeight >= el.scrollHeight - 20) loadMoreJournals();

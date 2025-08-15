@@ -11,29 +11,10 @@ export function useTileGridMeasure(params: {
   setTileColumnSize: (n: number) => void;
   tileRowSize: number;
   setTileRowSize: (n: number) => void;
-  setMaxBoxNumber: (fn: (cur: number) => number) => void;
 }) {
-  const { tileRef, tileGridHeight, measuredRowHeightRef, tileColumnSize, setTileColumnSize, tileRowSize, setTileRowSize, setMaxBoxNumber } = params;
+  const { tileRef, tileGridHeight, measuredRowHeightRef, tileColumnSize, setTileColumnSize, tileRowSize, setTileRowSize } = params;
 
-  useEffect(() => {
-    const handleScroll = () => {
-      if (!tileRef.current) return;
-      const rh = measuredRowHeightRef.current || tileGridHeight;
-      const scrollTop = tileRef.current.scrollTop;
-      const scrolledRows = Math.floor(scrollTop / rh);
-      const columnSize = tileColumnSize || 1;
-      const rowsInAScreen = tileRowSize || 1;
-      const loadScreensAhead = 3;
-      const targetRows = rowsInAScreen + scrolledRows + rowsInAScreen * loadScreensAhead;
-      const limit = columnSize * targetRows;
-      setMaxBoxNumber((current) => (current < limit ? limit : current));
-    };
-    const el = tileRef.current;
-    if (el) el.addEventListener('scroll', handleScroll);
-    return () => {
-      if (el) el.removeEventListener('scroll', handleScroll);
-    };
-  }, [tileRowSize, tileColumnSize, tileRef.current]);
+  // Scroll-based incremental loading is disabled: no scroll listener here.
 
   useEffect(() => {
     if (!tileRef.current) return;

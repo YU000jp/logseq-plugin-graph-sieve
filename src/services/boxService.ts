@@ -18,16 +18,15 @@ export const boxService = {
     await db.box.where('graph').equals(graph).delete();
   },
   async recent(graph: string, limit: number): Promise<Box[]> {
-    return db.box
-      .orderBy('time')
-      .filter((b) => b.graph === graph)
-      .reverse()
-      .limit(limit)
-      .toArray();
+    const q = db.box.orderBy('time').filter((b) => b.graph === graph).reverse();
+    if (!isFinite(limit) || limit <= 0) return q.toArray();
+    return q.limit(limit).toArray();
   },
   async recentAll(limit: number): Promise<Box[]> {
     // Across all graphs, by time desc
-    return db.box.orderBy('time').reverse().limit(limit).toArray();
+    const q = db.box.orderBy('time').reverse();
+    if (!isFinite(limit) || limit <= 0) return q.toArray();
+    return q.limit(limit).toArray();
   },
   async allByGraph(graph: string): Promise<Box[]> {
     return db.box.where('graph').equals(graph).toArray();
