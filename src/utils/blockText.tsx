@@ -20,6 +20,7 @@ export const RE = {
   bulletStart: /^\s*([-*+]|\d+\.)\s+/,  refOrEmbed: /((\(\([0-9a-fA-F-]{36}\)\)))|\{\{\s*embed\b[^}]*\}\}/i,
   inlineRef: /\(\([0-9a-fA-F-]{36}\)\)/g, inlineEmbedBlock: /\{\{\s*embed\s*\(\([0-9a-fA-F-]{36}\)\)\s*\}\}/gi,
   inlineEmbedPage: /\{\{\s*embed\s*\[\[[^\]]+\]\]\s*\}\}/gi, query: /\{\{\s*query\b[^}]*\}\}/i,
+  renderer: /\{\{\s*renderer\b[^}]*\}\}/i,
   loneDash: /^\s*-\s*$/, pageRef: /\[\[([^\]]+)\]\]/g, mdImage: /!\[[^\]]*\]\([^)]*\)/g,
   mdLink: /\[([^\]]+)\]\([^)]*\)/g, lsLinkWithAlias: /\[\[([^\]]+)\]\[([^\]]*)\]\]/g, uuid: /[0-9a-fA-F-]{36}/
 };

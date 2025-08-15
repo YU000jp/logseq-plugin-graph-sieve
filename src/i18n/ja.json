@@ -1,27 +1,20 @@
 {
-    "rebuild": "再構築",
-    "open-pages-btn": "pagesフォルダを選択",
-    "open-pages-btn-label": "Logseqのグラフ保存先フォルダにあるpagesフォルダを選択してください。",
     "footer": "本文のないページは表示されません。クリックまたはカーソル移動+Enterキーで開きます。",
     "loading": "構築中...",
     "please-select-pages": "pagesという名前のフォルダを選択してください。",
-    "filter-by-page-tag": "ページタグで絞り込み",
-        "filter-by-page-name": "ページ名で絞り込み",
+    "filter-by-page-name": "ページ名で絞り込み",
     "cancel": "キャンセル",
     "tab-content": "内容",
     "tab-no-markdown": "マークダウンなし",
     "tab-raw": "RAW",
-    "tab-raw-custom": "RAWカスタム",
-    "tab-info": "情報",
     "toggle-hide-properties": "プロパティ非表示",
-    "toggle-hide-refs": "参照/埋め込みを非表示",
     "toggle-strip-page-brackets": "[[ ]] 括弧を外す",
     "toggle-page-links": "ページリンクを有効",
     "toggle-hide-page-refs": "ページ参照を非表示",
     "toggle-hide-queries": "クエリブロックを非表示",
+    "toggle-hide-renderers": "レンダラーを非表示",
     "always-hide-props": "常に除外するプロパティ",
     "always-hide-props-ph": "例: author,source",
-    "open-in-logseq": "Logseqで開く",
     "close": "閉じる",
     "sidebar-placeholder": "カードを選択するとここに内容を表示します",
     "loading-content": "読み込み中...",
@@ -29,38 +22,23 @@
     "copy-content": "本文をコピー",
     "copied": "コピーしました",
     "copy-failed": "コピーに失敗しました",
-    "file-modified": "ファイル更新日時",
-    "backlinks": "バックリンク",
     "related": "関連",
     "subpages": "サブページ",
     "subpages-deeper-notice": "(直下の子ページが無いため下位階層ページを表示しています)",
     "favorites": "お気に入り",
     "favorite": "お気に入り",
     "unfavorite": "お気に入り解除",
-    "close-all-tabs": "すべてのタブを閉じる"
-        , "graph-label": "グラフ",
-    "detached-mode": "非連動モード",
-    "detached-mode-hint": "全グラフのページを表示 (Logseq本体では開けません)",
-    "exclude-journals": "ジャーナル除外",
-    "exclude-journals-hint": "ジャーナルページを含める/除外する切替",
+    "close-all-tabs": "すべてのタブを閉じる",
+    "graph-label": "グラフ",
     "remove-strings": "文字列除去",
     "remove-strings-ph": "例: 下書き,TODO,foo",
-    "raw-toggle-full": "フルソース",
-    "raw-toggle-summary": "要約",
     "sample-text": "The quick brown fox jumps over the lazy dog / 迅速な茶色の狐が怠惰な犬を飛び越える 0123456789",
-    "note-fonts": "メモ: Google Fonts でウェイト未提供の値を指定すると自動で近いウェイトで表示されます。"
-    ,"journal-date-format-label": "ジャーナル日付フォーマット"
-    ,"journal-date-format-help": "トークン: yyyy MM dd (初期値 yyyy/MM/dd)"
-    ,"journal-link-format-label": "ジャーナルリンクの書式（解析用）"
-    ,"journal-link-format-help": "2023/01/17 のようなリンクを解析。トークン: yyyy MM dd"
-    ,"toggle-remove-macros": "マクロ除去"
-    ,"toggle-normalize-tasks": "タスク一般化"
-    ,"toggle-remove-macros-help": "{{renderer ...}} 等のクエリ以外のマクロや独自マクロを除去"
-    ,"toggle-normalize-tasks-help": "TODO / DOING / DONE / LATER / NOW / WAITING / CANCELLED をMarkdownチェックボックスへ変換"
-    ,"mode-choose-title": "モードを選択"
-    ,"mode-choose-desc": "グラフの読み取り方法を選んでください:"
-    ,"mode-choose-logseq-desc": "Logseqモード: 現在 Logseq で開いているグラフを使用します。"
-    ,"mode-choose-folder-desc": "フォルダモード: Logseqなしで閲覧するために pages フォルダを選択します。"
-    ,"mode-choose-logseq-btn": "Logseq モード"
-    ,"mode-choose-folder-btn": "フォルダ モード"
+    "note-fonts": "メモ: Google Fonts でウェイト未提供の値を指定すると自動で近いウェイトで表示されます。",
+    "toggle-remove-macros": "マクロ除去",
+    "toggle-normalize-tasks": "タスク一般化",
+    "toggle-remove-macros-help": "{{renderer ...}} 等のクエリ以外のマクロや独自マクロを除去",
+    "toggle-normalize-tasks-help": "TODO / DOING / DONE / LATER / NOW / WAITING / CANCELLED をMarkdownチェックボックスへ変換",
+    "mode-choose-folder-desc": "フォルダモード: Logseqなしで閲覧するために pages フォルダを選択します。",
+    "mode-choose-folder-btn": "フォルダ モード",
+    "settings": "設定"
 }

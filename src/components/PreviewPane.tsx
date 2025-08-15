@@ -41,6 +41,8 @@ export interface PreviewPaneProps {
   setHidePageRefs: (v: boolean) => void;
   hideQueries: boolean;
   setHideQueries: (v: boolean) => void;
+  hideRenderers: boolean;
+  setHideRenderers: (v: boolean) => void;
   removeMacros: boolean;
   setRemoveMacros: (v: boolean) => void;
   normalizeTasks: boolean;
@@ -56,7 +58,6 @@ export interface PreviewPaneProps {
   currentGraph: string;
   preferredDateFormat: string;
   assetsDirHandle?: FileSystemDirectoryHandle;
-  detachedMode: boolean;
 
   // Related content
   subpages: Box[];
@@ -90,8 +91,10 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
     setStripPageBrackets,
     hidePageRefs,
     setHidePageRefs,
-    hideQueries,
+  hideQueries,
+  hideRenderers,
     setHideQueries,
+  setHideRenderers,
     removeMacros,
     setRemoveMacros,
     normalizeTasks,
@@ -105,7 +108,6 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
     currentGraph,
     preferredDateFormat,
   assetsDirHandle,
-    detachedMode,
   subpages,
   subpagesDeeper,
   related,
@@ -153,7 +155,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
       const displayFull = isJournalSingle ? journalVirtualPaths[i] : segments.slice(0, i + 1).join('/');
       crumbs.push(
         <a key={`crumb-${i}`} href='#' className='crumb'
-          onClick={(e) => { e.preventDefault(); (e as React.MouseEvent).shiftKey ? (logseq.App.pushState('page', { name: targetName }), logseq.hideMainUI({ restoreEditingCursor: true })) : void openPageInPreviewByName(targetName); }}
+          onClick={(e) => { e.preventDefault(); void openPageInPreviewByName(targetName); }}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openPageInPreviewByName(targetName); } }}
           tabIndex={0} title={displayFull}><span className='crumb-text'>{label}</span></a>
       );
@@ -193,6 +195,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={stripPageBrackets} onChange={(_, v) => setStripPageBrackets(v)} />} label={t('toggle-strip-page-brackets') || 'Strip [[ ]]'} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={!hidePageRefs} onChange={(_, v) => setHidePageRefs(!v)} />} label={t('toggle-page-links') || t('toggle-hide-page-refs') || 'Page links'} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={hideQueries} onChange={(_, v) => setHideQueries(v)} />} label={t('toggle-hide-queries') || 'Hide queries'} />
+          <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={hideRenderers} onChange={(_, v) => setHideRenderers(v)} />} label={t('toggle-hide-renderers') || 'Hide renderers'} />
           <Tooltip title={t('toggle-remove-macros-help') || 'Remove {{macro ...}} constructs (except queries unless hidden)'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={removeMacros} onChange={(_, v) => setRemoveMacros(v)} />} label={t('toggle-remove-macros') || 'Remove macros'} /></span></Tooltip>
           <Tooltip title={t('toggle-normalize-tasks-help') || 'Convert TODO/DONE etc. to Markdown checkboxes'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={normalizeTasks} onChange={(_, v) => setNormalizeTasks(v)} />} label={t('toggle-normalize-tasks') || 'Normalize tasks'} /></span></Tooltip>
         </div>}
@@ -213,6 +216,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
               } else {
                 text = flattenBlocksToText(sidebarBlocks as BlockNode[], hideProperties, true, 0, alwaysHideKeys, folderMode, removeStrings);
               }
+              if (hideRenderers) text = text.replace(/\{\{\s*renderer\b[^}]*\}\}/ig, '');
               if (sidebarTab !== 'outline') {
                 text = text.split('\n').filter(l => l.trim().length > 0).join('\n');
                 if (stripPageBrackets) {
@@ -232,10 +236,14 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
               try {
                 if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
                 else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
-                logseq.UI.showMsg(t('copied'));
-              } catch (e) { console.error(e); logseq.UI.showMsg(t('copy-failed')); }
+                const lg = (window as any).logseq;
+                if (lg && lg.UI && typeof lg.UI.showMsg === 'function') lg.UI.showMsg(t('copied'));
+              } catch (e) {
+                console.error(e);
+                const lg = (window as any).logseq;
+                if (lg && lg.UI && typeof lg.UI.showMsg === 'function') lg.UI.showMsg(t('copy-failed'));
+              }
             }}>{t('copy-content')}</Button> ); })()}
-            {(!detachedMode && sidebarBox && sidebarBox.graph === currentGraph) && <Button size='small' variant='outlined' onClick={() => { if (!sidebarBox) return; logseq.App.pushState('page', { name: sidebarBox.name }); logseq.hideMainUI({ restoreEditingCursor: true }); }}>{t('open-in-logseq')}</Button>}
           </div>
         </div>
       </div>
@@ -263,8 +271,19 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
               <div className={'sidebar-pane sidebar-pane-main'} style={{ flex: mainFlex }}>
                 <div className={'sidebar-main-text' + (copyHover ? ' copy-target-hover' : '')}>
                   {sidebarLoading ? <div className='sidebar-loading'>{t('loading-content')}</div> : sidebarTab === 'content' ? (() => {
-                    const has = hasRenderableContent((sidebarBlocks || []) as BlockNode[], hideProperties, true, alwaysHideKeys, hidePageRefs, hideQueries, removeStrings);
-                    return (<>{has ? <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} /> : <div className='sidebar-empty'>{t('no-content')}</div>}</>);
+                    const has = hasRenderableContent((sidebarBlocks || []) as BlockNode[], hideProperties, true, alwaysHideKeys, hidePageRefs, hideQueries, removeStrings, hideRenderers);
+                    if (has) {
+                      return <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} hideRenderers={hideRenderers} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} />;
+                    }
+                    // ジャーナルは refs/queries のみで構成されることがあるためフォールバックで本文表示
+                    if (isJournalPreview) {
+                      return <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={false} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={false} removeStrings={removeStrings} />;
+                    }
+                    // 空配列/nullの時は空表示
+                    if (!sidebarBlocks || (Array.isArray(sidebarBlocks) && sidebarBlocks.length === 0)) {
+                      return <div className='sidebar-empty'>{t('no-content')}</div>;
+                    }
+                    return <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} />;
                   })() : sidebarTab === 'nomark' ? <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} /> : sidebarTab === 'outline' ? <RawCustomView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} folderMode={folderMode} normalizeTasks={normalizeTasks} /> : null}
                 </div>
               </div>

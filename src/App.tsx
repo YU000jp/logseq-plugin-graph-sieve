@@ -1,8 +1,6 @@
-import { logger } from './logger'; // logger.tsからロガーをインポート
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 // import { BlockEntity } from '@logseq/libs/dist/LSPlugin.user';
 import { useTranslation } from "react-i18next";
-import i18n from "i18next";
 import { Box } from './db';
 import './App.css'
 import { useUiTypography } from './hooks/useUiTypography';
@@ -14,13 +12,11 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { Button, IconButton, InputAdornment, TextField, Tooltip, Chip, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import { Clear } from '@mui/icons-material';
 import SettingsIcon from '@mui/icons-material/Settings';
-import { encodeLogseqFileName, getSummary, getSummaryFromRawText, parseOperation, decodeLogseqFileName } from './utils';
-import { getPageBlocksTreeSafe } from './services/queryService';
+import { encodeLogseqFileName, getSummaryFromRawText, decodeLogseqFileName } from './utils';
 import { rebuildDatabase } from './services/rebuildService';
 import { boxService } from './services/boxService';
 // query services are used within rebuildService
 import { getString, setString, getBoolean, setBoolean, getNumber, setNumber, remove as lsRemove } from './utils/storage';
-import type { MarkdownOrOrg, FileChanges } from './types';
 import CardList from './components/CardList';
 import { displayTitle as displayTitleUtil, journalDayWeek as journalDayWeekUtil, isJournalName as isJournalNameUtil } from './utils/journal';
 import PreviewTabs from './components/PreviewTabs';
@@ -38,11 +34,10 @@ function App() {
   // ルート直下 (pages と siblings) に journals フォルダがある場合の参照
   const [journalsDirHandle, setJournalsDirHandle] = useState<FileSystemDirectoryHandle>();
   const [currentGraph, setCurrentGraph] = useState<string>('');
-  const [preferredDateFormat, setPreferredDateFormat] = useState<string>('');
+  const [preferredDateFormat] = useState<string>('');
   // 日付/フォント設定機能削除に伴い固定スタイル & 既定日付書式を使用
-  // ジャーナル日付表示パターン (ユーザー設定可能)
-  const [journalDatePattern, setJournalDatePattern] = useState<string>(() => getString('journalDatePattern', 'yyyy/MM/dd'));
-  useEffect(()=>{ setString('journalDatePattern', journalDatePattern); }, [journalDatePattern]);
+  // 日付フォーマットは固定表示（設定項目削除）
+  const journalDatePattern = 'yyyy/MM/dd';
   // ジャーナルリンクのパースは自動判定へ統一（個別フォーマット設定は廃止）
   // グローバル設定（現在はプレースホルダ）
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
@@ -58,7 +53,6 @@ function App() {
   // Google Fonts 自動読み込み + 動的スタイル注入
   useUiTypography(uiFontFamily, uiFontSize, uiLineHeight, uiFontWeight);
   const resetUiFont = () => { setUiFontSize(13); setUiFontFamily(''); setUiLineHeight(1.5); setUiFontWeight(400); };
-  const [preferredFormat, setPreferredFormat] = useState<MarkdownOrOrg>('markdown');
   const [loading, setLoading] = useState<boolean>(true);
   // カード再構築中ロック用
   const [cardsUpdating, setCardsUpdating] = useState<boolean>(false);
@@ -79,15 +73,14 @@ function App() {
   const [maxBoxNumber, setMaxBoxNumber] = useState<number>(100);
   // Exclude journals トグルは廃止
   // 自動デタッチモード: Logseq が現在開いているグラフとプラグインで扱うグラフが異なる場合 true
-  const [detachedMode, setDetachedMode] = useState<boolean>(false);
-  const [logseqCurrentGraph, setLogseqCurrentGraph] = useState<string>('');
-  // 明示的モード: Logseq既存グラフ or フォルダ(fs_)
-  const [graphMode, setGraphMode] = useState<'logseq' | 'folder'>(() => (getString('graphMode', 'logseq') === 'folder' ? 'folder' : 'logseq'));
-  // モード選択ダイアログは常に最初に表示（保存値があっても再選択させる）
+  // フォルダモードのみ
+  const graphMode = 'folder' as const;
+  // フォルダ選択ダイアログ表示制御
   const [modeChosen, setModeChosen] = useState<boolean>(false);
   // Sidebar preview sessions (multi-preview)
   type PreviewTab = 'content' | 'nomark' | 'outline' | 'raw-custom';
-  type Preview = { box: Box; blocks: any[] | null; loading: boolean; tab: PreviewTab; pinned: boolean; createdAt: number };
+  interface BlockNode { uuid: string; content: string; children: BlockNode[] }
+  type Preview = { box: Box; blocks: BlockNode[] | null; loading: boolean; tab: PreviewTab; pinned: boolean; createdAt: number };
   const [previews, setPreviews] = useState<Preview[]>([]);
   const [activePreviewIndex, setActivePreviewIndex] = useState<number>(-1);
   const [maxPreviewTabs, setMaxPreviewTabs] = useState<number>(() => getNumber('maxPreviewTabs', 10) || 10);
@@ -109,6 +102,8 @@ function App() {
   });
   // クエリ ({{query ...) を隠すトグル（デフォルトOFF）
   const [hideQueries, setHideQueries] = useState<boolean>(() => getBoolean('hideQueries', false));
+  // rendererマクロ除去トグル
+  const [hideRenderers, setHideRenderers] = useState<boolean>(() => getBoolean('hideRenderers', false));
   // RAWタブ: アウトライン(概要)とフルソース切替
   // rawFullMode 廃止: 常に SUMMARY スタイル (旧 RawCustomView)
   // Option: always hide specific property keys (comma-separated), persisted in localStorage
@@ -151,32 +146,10 @@ function App() {
   useEffect(() => { setBoolean('stripPageBrackets', stripPageBrackets); }, [stripPageBrackets]);
   useEffect(() => { setBoolean('hidePageRefs', hidePageRefs); }, [hidePageRefs]);
   useEffect(() => { setBoolean('hideQueries', hideQueries); }, [hideQueries]);
+  useEffect(() => { setBoolean('hideRenderers', hideRenderers); }, [hideRenderers]);
   useEffect(() => { setString('removeStrings', removeStringsRaw); }, [removeStringsRaw]);
   // detachedMode は自動判定なので保存しない
   useEffect(() => { if (modeChosen) setString('graphMode', graphMode); }, [graphMode, modeChosen]);
-  useEffect(() => {
-    if (!modeChosen) return;
-    const syncGraph = async () => {
-      try {
-        const { currentGraph: cg } = await logseq.App.getUserConfigs();
-        if (cg && cg !== currentGraph) {
-          if (graphMode === 'logseq') setCurrentGraph(cg); // フォルダモード時は synthetic を保持
-        }
-        setLogseqCurrentGraph(cg);
-        if (graphMode === 'folder') {
-          setDetachedMode(true);
-        } else {
-          if (currentGraph && cg && cg !== currentGraph) setDetachedMode(true); else setDetachedMode(false);
-        }
-      } catch { /* ignore */ }
-    };
-    syncGraph();
-    const id = setInterval(syncGraph, 4000);
-    // UI 再表示時にも判定
-    const handler = ({ visible }: any) => { if (visible) syncGraph(); };
-    logseq.on('ui:visible:changed', handler);
-    return () => { clearInterval(id); try { (logseq as any).off && (logseq as any).off('ui:visible:changed', handler); } catch { /* ignore */ } };
-  }, [modeChosen, currentGraph, graphMode]);
 
   // UI 表示時（ツールバーから開かれたとき等）は毎回モード選択から開始する
   useEffect(() => {
@@ -191,67 +164,78 @@ function App() {
     };
   }, []);
 
-  // graphMode が logseq に戻った時 currentGraph を即同期
-  useEffect(() => {
-    if (!modeChosen) return;
-    if (graphMode === 'logseq') {
-      (async () => {
-        try {
-          const { currentGraph: cg } = await logseq.App.getUserConfigs();
-          if (cg) setCurrentGraph(cg);
-        } catch {/* ignore */}
-      })();
-    }
-  }, [modeChosen, graphMode]);
+  // Logseq同期は不要（フォルダ専用）
 
-  // 起動時: folderモード復元だが DirectoryHandle が無い場合は logseq に自動復帰
-  useEffect(() => {
-    if (!modeChosen) return;
-    if (graphMode === 'folder') {
-      const hasHandle = currentDirHandle || (currentGraph && dirHandles[currentGraph]);
-      if (!hasHandle) {
-        // フォルダ権限未復元なので logseq モードへ戻す
-        (async () => {
-          try {
-            const { currentGraph: cg } = await logseq.App.getUserConfigs();
-            if (cg) setCurrentGraph(cg);
-          } catch { /* ignore */ }
-          setGraphMode('logseq');
-          setString('graphMode', 'logseq');
-        })();
-      }
-    }
-  }, [modeChosen, graphMode, currentGraph, currentDirHandle]);
+  // 起動時: フォルダ権限がない場合は選択ダイアログで促すのみ
+  useEffect(() => { /* no-op */ }, [modeChosen, graphMode, currentGraph, currentDirHandle]);
 
-  // detachedMode のグローバル共有（App 以外に定義された補助レンダリング関数で参照）
-  useEffect(() => {
-    try { (window as any).__graphSieveDetachedMode = detachedMode; } catch { /* ignore */ }
-  }, [detachedMode]);
   // excludeJournals 永続化は廃止
-  // モード切替時にタブ / プレビューを全て閉じる
-  useEffect(() => {
-    setPreviews([]);
-    setActivePreviewIndex(-1);
-  }, [graphMode]);
+
+  // UUID重複スイープは不要（フォルダ専用）
 
   // フェイルセーフの強制上書きは廃止（段階的拡張で対処）
 
-  const cardboxes = useLiveQuery(
+  // フォルダモード: 名前規則で判定
+  const isJournalBox = useCallback((b: Box) => isJournalNameUtil(b.name), []);
+
+  // 別々のクエリで main/journals を取得
+  const mainBoxes = useLiveQuery(
     () => {
       if (!modeChosen) return Promise.resolve([] as Box[]);
-      if (graphMode === 'folder') {
-        return (async () => {
-          const all = await boxService.allByGraph(currentGraph);
-          // 時刻降順で並べ、現在の段階的上限で切る（後続エフェクトで自動拡張）
-          return all.sort((a,b)=> b.time - a.time).slice(0, maxBoxNumber);
-        })();
-      }
-      // Logseq グラフ: 時刻降順で現在上限まで（後続エフェクトで自動拡張）
-      if (detachedMode) return boxService.recentAll(maxBoxNumber);
-      return boxService.recent(currentGraph, maxBoxNumber);
+      const isJ = (b: Box) => isJournalBox(b);
+      return (async () => {
+        const all = await boxService.allByGraph(currentGraph);
+        return all
+          .filter(b => !isJ(b))
+          .sort((a,b)=> b.time - a.time)
+          .slice(0, maxBoxNumber);
+      })();
     },
-    [modeChosen, currentGraph, maxBoxNumber, detachedMode, graphMode]
+    [modeChosen, currentGraph, maxBoxNumber, isJournalBox]
   );
+
+  const journalBoxesRaw = useLiveQuery(
+    () => {
+      if (!modeChosen) return Promise.resolve([] as Box[]);
+      const isJ = (b: Box) => isJournalBox(b);
+      return (async () => {
+        const all = await boxService.allByGraph(currentGraph);
+        return all.filter(isJ).sort((a,b)=> journalDateValue(b.name) - journalDateValue(a.name) || (b.time - a.time));
+      })();
+    },
+    [modeChosen, currentGraph, isJournalBox]
+  );
+  const journalBoxes: Box[] = journalBoxesRaw || [];
+
+  // UUID重複の除去（表示用）: 同一uuid(空は対象外)は最新timeの1件だけ残す
+  const dedupeWithinByUuid = useCallback((list: Box[]) => {
+    const map = new Map<string, Box>();
+    for (const b of list) {
+      const u = (b.uuid || '').trim();
+      if (!u) continue; // 空uuidはそのまま（後段EMPTYで拾われる）
+      const prev = map.get(u);
+      if (!prev || b.time > prev.time) map.set(u, b);
+    }
+    const keep = new Set<string>(Array.from(map.values()).map(b => `${b.graph}::${b.name}`));
+    return list.filter(b => {
+      const u = (b.uuid || '').trim();
+      if (!u) return true; // 空uuidは対象外
+      const key = `${b.graph}::${b.name}`;
+      return keep.has(key);
+    });
+  }, []);
+
+  const journalBoxesDedupe = useMemo(() => dedupeWithinByUuid(journalBoxes), [journalBoxes, dedupeWithinByUuid]);
+  const mainBoxesDedupe = useMemo(() => dedupeWithinByUuid(mainBoxes || []), [mainBoxes, dedupeWithinByUuid]);
+
+  // ジャーナル側に存在するuuidは、非ジャーナルから除外（クロス除重）
+  const uuidInJournals = useMemo(() => new Set(journalBoxesDedupe.map(b => (b.uuid||'').trim()).filter(Boolean)), [journalBoxesDedupe]);
+  const nonJournalBase = useMemo(() => (mainBoxesDedupe || []).filter(b => {
+    const u = (b.uuid||'').trim();
+    return !u || !uuidInJournals.has(u);
+  }), [mainBoxesDedupe, uuidInJournals]);
+
+  // UUID補完は不要（フォルダ専用）
   
   // モードやグラフ変更時に再構築をトリガー（ロック/キャンセルで競合回避）
   useEffect(() => {
@@ -273,9 +257,9 @@ function App() {
   // メインカードを段階的に拡張ロード（UI 負荷を抑えつつ最終的に全件到達）
   const expandScheduledRef = useRef(false);
   useEffect(() => {
-    if (!cardboxes) return;
-    // 既に全体が上限未満なら（= これ以上増えない）終了
-    if (cardboxes.length < maxBoxNumber) return;
+    if (!mainBoxes) return;
+    // 既に main が上限未満なら（= これ以上増えない）終了
+    if (mainBoxes.length < maxBoxNumber) return;
     // 多重スケジュール抑止
     if (expandScheduledRef.current) return;
     const perScreen = Math.max(1, tileColumnSize * tileRowSize);
@@ -297,38 +281,19 @@ function App() {
       // setTimeout のみキャンセル対象
       if (typeof id === 'number') try { clearTimeout(id as unknown as number); } catch {}
     };
-  }, [cardboxes?.length, tileColumnSize, tileRowSize, maxBoxNumber]);
+  }, [mainBoxes?.length, tileColumnSize, tileRowSize, maxBoxNumber]);
 
   // Global ESC handling is included in keyboard navigation hook
 
   // computeRowHeight は useTileGridMeasure に含めた
 
-  useEffect(() => {
-    if (!modeChosen || graphMode !== 'logseq') return;
-    const getUserConfigs = async () => {
-      const { currentGraph, preferredDateFormat, preferredLanguage, preferredFormat } = await logseq.App.getUserConfigs();
-      setCurrentGraph(currentGraph);
-      setPreferredDateFormat(preferredDateFormat);
-      setPreferredFormat(preferredFormat);
-      i18n.changeLanguage(preferredLanguage);
-    };
-    getUserConfigs();
-
-    return logseq.App.onCurrentGraphChanged(async () => {
-      const { currentGraph } = await logseq.App.getUserConfigs();
-
-      setCurrentDirHandle(dirHandles[currentGraph]); // undefined or FileSystemDirectoryHandle
-
-      setCurrentGraph(currentGraph);
-    });
-  }, [modeChosen, graphMode]);
+  // Logseq 設定同期は不要（フォルダ専用）
 
   const rebuildDB = useCallback(async () => {
     await rebuildDatabase({
       currentGraph,
       currentDirHandle,
       journalsDirHandle,
-      preferredFormat,
       setLoading,
       setCardsUpdating,
       rebuildTokenRef,
@@ -336,272 +301,144 @@ function App() {
       batchSize: 100,
       batchSleepMs: 300,
     });
-  }, [currentGraph, currentDirHandle, journalsDirHandle, preferredFormat]);
+  }, [currentGraph, currentDirHandle, journalsDirHandle]);
 
   // excludeJournals 変更に伴う自動 Rebuild は廃止
 
   useEffect(() => { void rebuildDB(); }, [rebuildDB]);
 
-  useEffect(() => {
-    if (!modeChosen) return;
-    const onFileChanged = async (changes: FileChanges) => {
-      const [operation, originalName] = parseOperation(changes);
-
-      // Ignore create event because the file is not created yet.
-      if (operation == 'modified' || operation == 'delete') {
-        const updatedTime = new Date().getTime();
-        logger.debug(`${operation}, ${originalName}, ${updatedTime}`);
-
-        // A trailing slash in the title cannot be recovered from the file name. 
-        // This is because they are removed during encoding.
-        if (operation === 'modified') {
-          const blocks = await getPageBlocksTreeSafe(originalName);
-          if (!blocks) return;
-
-          const [summary, image] = getSummary(blocks);
-
-          if (summary.length > 0 && !(summary.length === 1 && summary[0] === '')) {
-            const box = await boxService.get([currentGraph, originalName]);
-            if (box) {
-              await boxService.update([currentGraph, originalName], {
-                time: updatedTime,
-                summary,
-                image,
-              });
-            } else {
-              // create
-              const page = await logseq.Editor.getPage(originalName);
-              if (page) {
-        await boxService.upsert({
-                  graph: currentGraph,
-                  name: originalName,
-                  uuid: page.uuid,
-                  time: updatedTime,
-                  summary,
-                  image,
-                });
-              }
-            }
-          } else {
-            // If became empty, remove existing box
-      await boxService.remove([currentGraph, originalName]);
-          }
-        }
-      }
-    };
-
-    // onChanged returns a function to unsubscribe.
-    // Use 'return unsubscribe_function' to call unsubscribe_function
-    // when component is unmounted, otherwise a lot of listeners will be left.
-    const removeOnChanged = logseq.DB.onChanged(onFileChanged);
-    return () => {
-      removeOnChanged();
-    }
-  }, [modeChosen, currentGraph]);
+  // Logseq DB 変更監視は不要（フォルダ専用）
 
   // キーボードナビゲーションのフックは、依存（visibleMainBoxes/openInSidebar）定義以降に呼ぶ
 
   const openInSidebar = useCallback(async (box: Box) => {
-    // Detached モードで別グラフの場合はファイル RAW から生成
     const keyMatch = (p: Preview) => (p.box.uuid && box.uuid)
       ? p.box.uuid === box.uuid
       : (p.box.graph === box.graph && p.box.name === box.name);
+
+    // 1) プレビュータブを作成/アクティブ化
     setPreviews(prev => {
-      // Already open? just activate
       const existed = prev.findIndex(p => keyMatch(p));
       if (existed >= 0) { setActivePreviewIndex(existed); return prev; }
-      // 保存時は fake uuid サフィックス (複製用) を除外
       const normalizedBox = { ...box } as Box;
       if (normalizedBox.uuid && normalizedBox.uuid.includes(':')) {
         normalizedBox.uuid = normalizedBox.uuid.split(':')[0];
       }
       const next: Preview = { box: normalizedBox, blocks: null, loading: true, tab: 'content', pinned: false, createdAt: Date.now() };
       const all = [...prev, next];
-      // Selection strategy: keep all pinned first (original order), then newest unpinned until cap
       const pinned = all.filter(p => p.pinned);
-      const unpinned = all.filter(p => !p.pinned).sort((a,b)=> b.createdAt - a.createdAt); // newest first
+      const unpinned = all.filter(p => !p.pinned).sort((a,b)=> b.createdAt - a.createdAt);
       let limited: Preview[];
       if (pinned.length >= maxPreviewTabs) {
-        limited = pinned.slice(0, maxPreviewTabs); // drop excess pinned oldest beyond cap
+        limited = pinned.slice(0, maxPreviewTabs);
       } else {
         const slots = maxPreviewTabs - pinned.length;
-        limited = [...pinned, ...unpinned.slice(0, slots)].sort((a,b)=> {
-          // preserve chronological open order among survivors based on createdAt asc
-          return a.createdAt - b.createdAt;
-        });
+        limited = [...pinned, ...unpinned.slice(0, slots)].sort((a,b)=> a.createdAt - b.createdAt);
       }
       const ni = limited.indexOf(next);
-      if (ni >= 0) setActivePreviewIndex(ni); else {
-        // New tab was evicted immediately (cap reached). Activate last tab.
-        setActivePreviewIndex(Math.max(0, limited.length - 1));
-      }
+      if (ni >= 0) setActivePreviewIndex(ni); else setActivePreviewIndex(Math.max(0, limited.length - 1));
       return limited;
     });
-  // フォルダモード(fs_*) または デタッチ状況ではファイルから直接読み込む
-    if (box.graph.startsWith('fs_') || (detachedMode && box.graph !== logseqCurrentGraph)) {
-      // ファイルから読み取る (フォルダモード or デタッチ)
-      try {
-        const pagesHandle = dirHandles[box.graph];
-        if (!pagesHandle) throw new Error('No directory handle for graph ' + box.graph);
 
-        const attemptLocate = async (): Promise<{ file: File; picked: string } | null> => {
-          const primaryBase = encodeLogseqFileName(box.name);
-            // slash variant decode for safety
-          const nameVariants = Array.from(new Set([
-            box.name,
-            primaryBase,
-            box.name.replace(/\//g,'___')
-          ]));
-          const exts = ['.md', '.org'];
-          const tryInDir = async (dir: FileSystemDirectoryHandle): Promise<{file: File; picked: string} | null> => {
-            // direct filename candidates
-            for (const v of nameVariants) {
-              for (const ext of exts) {
-                const candidate = v + ext;
-                const fh = await dir.getFileHandle(candidate).catch(()=>null);
-                if (fh) { const f = await fh.getFile(); return { file: f, picked: candidate }; }
-              }
-            }
-            // scan decode fallback
-            try {
-              // @ts-ignore
-              for await (const [entryName, entry] of (dir as any).entries()) {
-                if (!entryName || entry.kind !== 'file' || !/\.(md|org)$/i.test(entryName)) continue;
-                const base = entryName.replace(/\.(md|org)$/i,'');
-                if (decodeLogseqFileName(base) === box.name) {
-                  const fh = await dir.getFileHandle(entryName).catch(()=>null);
-                  if (fh) { const f = await fh.getFile(); return { file: f, picked: entryName }; }
-                }
-              }
-            } catch {/* ignore */}
-            return null;
-          };
-
-          // 1) pages 直下
-          let located = await tryInDir(pagesHandle);
-          if (located) return located;
-
-          // 2) pages/journals サブフォルダ
-          const subJournals = await pagesHandle.getDirectoryHandle('journals').catch(()=>null);
-          if (subJournals) {
-            located = await tryInDir(subJournals);
-            if (located) return located;
-          }
-          // 3) sibling journalsDirHandle (folder root)
-          if (journalsDirHandle) {
-            located = await tryInDir(journalsDirHandle);
-            if (located) return located;
-          }
-          return null;
-        };
-
-        const found = await attemptLocate();
-        if (!found) throw new Error('File not found for ' + box.name);
-        const { file, picked } = found;
-        const text = await file.text();
-        console.debug('[openInSidebar][detached] loaded file', picked, 'bytes=', text.length);
-        // 箇条書き(md)を階層化する簡易パーサ
-        const parseBullets = (src: string) => {
-          const bulletRe = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
-          const root: any[] = [];
-          const stack: { level: number; node: any }[] = [];
-          const normIndent = (s: string) => s.replace(/\t/g, '  ').length; // tab -> 2 spaces
-          let id = 0;
-          for (const rawLine of src.split(/\r?\n/)) {
-            const line = rawLine.replace(/\s+$/,'');
-            if (!line.trim()) continue;
-            const m = line.match(bulletRe);
-            if (m) {
-              const level = Math.floor(normIndent(m[1]) / 2); // 2 spaces 基準
-              const content = m[3];
-              const node = { uuid: `fs-${box.name}-${id++}`, content, children: [] as any[] };
-              while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
-              if (stack.length === 0) root.push(node); else stack[stack.length - 1].node.children.push(node);
-              stack.push({ level, node });
-            } else {
-              // 直前ブロックへの追記 (段落行)
-              if (stack.length) {
-                const cur = stack[stack.length - 1].node;
-                cur.content = cur.content ? cur.content + '\n' + line.trim() : line.trim();
-              } else {
-                // 単独段落としてトップレベル
-                root.push({ uuid: `fs-${box.name}-${id++}`, content: line.trim(), children: [] });
-              }
-            }
-          }
-          return root;
-        };
-        let blocks = parseBullets(text);
-        // パース結果が空ならパラグラフ単位でフォールバック
-        if (!blocks || blocks.length === 0) {
-          const paras = text.split(/\n{2,}/).map(s => s.trim()).filter(Boolean);
-          blocks = paras.map((p, i) => ({ uuid: `fs-${box.name}-p${i}`, content: p, children: [] }));
-        }
-        // 依然として空なら全文を単一ブロックに (スペースのみなら空配列)
-        if (blocks.length === 0 && text.trim()) {
-          blocks = [{ uuid: `fs-${box.name}-all`, content: text.trim(), children: [] }];
-        }
-        setPreviews(prev => {
-          const idx = prev.findIndex(p => keyMatch(p));
-          if (idx < 0) return prev;
-          const updated = [...prev];
-          updated[idx] = { ...updated[idx], blocks, loading: false };
-          return updated;
-        });
-      } catch (e) {
-        console.warn('Detached raw preview failed', e);
-        setPreviews(prev => {
-          const idx = prev.findIndex(p => keyMatch(p));
-          if (idx < 0) return prev;
-          const updated = [...prev];
-          updated[idx] = { ...updated[idx], blocks: [], loading: false };
-          return updated;
-        });
-      }
-      return;
-    }
-    // 通常 (同じ実グラフ) ロード
+    // 2) フォルダからファイルを読み取り、簡易ブロックへ変換
     try {
-      const tried: string[] = [];
-  const attemptFetchBlocks = async (nm: string) => { tried.push(nm); return await getPageBlocksTreeSafe(nm); };
-      let blocks: any = null;
-      if (box.uuid) {
-        blocks = await attemptFetchBlocks(box.uuid);
-      }
-      if (!blocks || !Array.isArray(blocks) || blocks.length === 0) {
-        // try by encoded/original name variations
-        blocks = await attemptFetchBlocks(box.name);
-      }
-      if ((!blocks || blocks.length === 0) && /%2F/i.test(box.name)) {
-        const decodedSlash = box.name.replace(/%2F/gi, '/');
-        if (decodedSlash !== box.name) {
-          blocks = await attemptFetchBlocks(decodedSlash);
-        }
-      }
-      if ((!blocks || blocks.length === 0)) {
-        // fetch page to get uuid then retry
-        const page = await logseq.Editor.getPage(box.name).catch(async () => {
-          if (/%2F/i.test(box.name)) return await logseq.Editor.getPage(box.name.replace(/%2F/gi,'/')).catch(()=>null);
+      const pagesHandle = dirHandles[box.graph];
+      if (!pagesHandle) throw new Error('No directory handle for graph ' + box.graph);
+
+      const attemptLocate = async (): Promise<{ file: File; picked: string } | null> => {
+        const primaryBase = encodeLogseqFileName(box.name);
+        const nameVariants = Array.from(new Set([
+          box.name,
+          primaryBase,
+          box.name.replace(/\//g,'___')
+        ]));
+        const exts = ['.md', '.org'];
+        const tryInDir = async (dir: FileSystemDirectoryHandle): Promise<{file: File; picked: string} | null> => {
+          for (const v of nameVariants) {
+            for (const ext of exts) {
+              const candidate = v + ext;
+              const fh = await dir.getFileHandle(candidate).catch(()=>null);
+              if (fh) { const f = await fh.getFile(); return { file: f, picked: candidate }; }
+            }
+          }
+          try {
+            for await (const [entryName, entry] of (dir as any).entries()) {
+              if (!entryName || entry.kind !== 'file' || !/\.(md|org)$/i.test(entryName)) continue;
+              const base = entryName.replace(/\.(md|org)$/i,'');
+              if (decodeLogseqFileName(base) === box.name) {
+                const fh = await dir.getFileHandle(entryName).catch(()=>null);
+                if (fh) { const f = await fh.getFile(); return { file: f, picked: entryName }; }
+              }
+            }
+          } catch {/* ignore */}
           return null;
-        });
-        const altUuid = (page as any)?.uuid;
-        if (altUuid) {
-          blocks = await attemptFetchBlocks(altUuid);
+        };
+
+        let located = await tryInDir(pagesHandle);
+        if (located) return located;
+        const subJournals = await pagesHandle.getDirectoryHandle('journals').catch(()=>null);
+        if (subJournals) {
+          located = await tryInDir(subJournals);
+          if (located) return located;
         }
+        if (journalsDirHandle) {
+          located = await tryInDir(journalsDirHandle);
+          if (located) return located;
+        }
+        return null;
+      };
+
+      const found = await attemptLocate();
+      if (!found) throw new Error('File not found for ' + box.name);
+      const { file } = found;
+      const text = await file.text();
+
+  const parseBullets = (src: string): BlockNode[] => {
+        const bulletRe = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
+  const root: BlockNode[] = [];
+  const stack: { level: number; node: BlockNode }[] = [];
+        const normIndent = (s: string) => s.replace(/\t/g, '  ').length;
+        let id = 0;
+        for (const rawLine of src.split(/\r?\n/)) {
+          const line = rawLine.replace(/\s+$/,'');
+          if (!line.trim()) continue;
+          const m = line.match(bulletRe);
+          if (m) {
+            const level = Math.floor(normIndent(m[1]) / 2);
+            const content = m[3];
+            const node: BlockNode = { uuid: `fs-${box.name}-${id++}`, content, children: [] };
+            while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
+            if (stack.length === 0) root.push(node); else stack[stack.length - 1].node.children.push(node);
+            stack.push({ level, node });
+          } else {
+            if (stack.length) {
+              const cur = stack[stack.length - 1].node;
+              cur.content = cur.content ? cur.content + '\n' + line.trim() : line.trim();
+            } else {
+              root.push({ uuid: `fs-${box.name}-${id++}`, content: line.trim(), children: [] });
+            }
+          }
+        }
+        return root;
+      };
+
+  let blocks: BlockNode[] = parseBullets(text);
+      if (!blocks || blocks.length === 0) {
+        const paras = text.split(/\n{2,}/).map(s => s.trim()).filter(Boolean);
+        blocks = paras.map((p, i) => ({ uuid: `fs-${box.name}-p${i}`, content: p, children: [] }));
       }
-      if (!blocks || !Array.isArray(blocks)) blocks = [];
-      if (blocks.length === 0) {
-        console.debug('[openInSidebar] empty blocks for', box.name, 'tried=', tried);
+      if (blocks.length === 0 && text.trim()) {
+        blocks = [{ uuid: `fs-${box.name}-all`, content: text.trim(), children: [] }];
       }
       setPreviews(prev => {
         const idx = prev.findIndex(p => keyMatch(p));
         if (idx < 0) return prev;
         const updated = [...prev];
-        updated[idx] = { ...updated[idx], blocks: Array.isArray(blocks) ? blocks : [], loading: false };
+        updated[idx] = { ...updated[idx], blocks, loading: false };
         return updated;
       });
     } catch (e) {
-      console.error(e);
+      console.warn('Folder raw preview failed', e);
       setPreviews(prev => {
         const idx = prev.findIndex(p => keyMatch(p));
         if (idx < 0) return prev;
@@ -610,7 +447,7 @@ function App() {
         return updated;
       });
     }
-  }, [detachedMode, logseqCurrentGraph, maxPreviewTabs, journalsDirHandle]);
+  }, [maxPreviewTabs, journalsDirHandle]);
 
   // Enforce new maxPreviewTabs immediately when user changes the number
   useEffect(() => {
@@ -637,21 +474,21 @@ function App() {
     });
   }, [maxPreviewTabs]);
 
-  // Persist pinned tabs per mode (logseq / folder)
+  // Persist pinned tabs (folder-only)
   useEffect(() => {
     try {
-      const key = 'pinnedTabs_' + graphMode;
+      const key = 'pinnedTabs_folder';
       const payload = previews.filter(p => p.pinned).map(p => ({ graph: p.box.graph, name: p.box.name }));
   setString(key, JSON.stringify(payload));
     } catch {/* ignore */}
-  }, [previews, graphMode]);
+  }, [previews]);
 
-  // Restore pinned tabs when mode changes or when currentGraph changes (only if no previews currently shown)
+  // Restore pinned tabs (folder-only)
   useEffect(() => {
     (async () => {
       if (previews.length > 0) return; // only auto-restore when empty
       let list: Array<{ graph: string; name: string }>; let raw: string | null = null;
-  try { raw = getString('pinnedTabs_' + graphMode, ''); } catch {/* ignore */}
+  try { raw = getString('pinnedTabs_folder', ''); } catch {/* ignore */}
       if (!raw) return;
       try { list = JSON.parse(raw) || []; } catch { return; }
       if (!Array.isArray(list) || list.length === 0) return;
@@ -676,7 +513,7 @@ function App() {
         return arr;
       });
     })();
-  }, [graphMode, currentGraph]);
+  }, [currentGraph]);
 
   const closeActivePreview = useCallback(() => {
     setPreviews(prev => {
@@ -785,16 +622,17 @@ function App() {
           return;
         }
   const items = (await boxService.allByGraph(currentGraph)).filter(b => b.name.startsWith(name + '/'));
+        const itemsFiltered = items;
         const prefix = name + '/';
-        const oneLevel = items.filter(b => {
+        const oneLevel = itemsFiltered.filter(b => {
           const rest = b.name.slice(prefix.length);
           return rest.length > 0 && !rest.includes('/');
         });
         if (oneLevel.length > 0) {
           setSubpages(oneLevel);
           setSubpagesDeeper(false);
-        } else if (items.length > 0) {
-          const limited = items.slice(0, 80);
+        } else if (itemsFiltered.length > 0) {
+          const limited = itemsFiltered.slice(0, 80);
           setSubpages(limited);
           setSubpagesDeeper(true);
         } else {
@@ -813,10 +651,11 @@ function App() {
       if (!currentGraph) { setFavorites([]); return; }
       try {
   const allFav = await boxService.favoritesByGraph(currentGraph);
-        if (!name) { setFavorites(allFav.slice(0, 50)); return; }
+        const favFiltered = allFav;
+    if (!name) { setFavorites(favFiltered.slice(0, 50)); return; }
         const prefix = name + '/';
-        const children = allFav.filter(b => b.name.startsWith(prefix));
-        const others = allFav.filter(b => !b.name.startsWith(prefix));
+    const children = favFiltered.filter(b => b.name.startsWith(prefix));
+    const others = favFiltered.filter(b => !b.name.startsWith(prefix));
         setFavorites([ ...children, ...others ].slice(0, 50));
       } catch { setFavorites([]); }
     };
@@ -829,7 +668,8 @@ function App() {
       if (!currentGraph) { setLeftFavorites([]); return; }
       try {
   const favs = await boxService.favoritesByGraph(currentGraph);
-        setLeftFavorites(favs.slice(0, 100));
+        const favsFiltered = favs;
+    setLeftFavorites(favsFiltered.slice(0, 100));
       } catch { setLeftFavorites([]); }
     };
     loadLeftFav();
@@ -859,8 +699,7 @@ function App() {
     let acc = 5381;
     try {
       let count = 0;
-      // @ts-ignore
-      for await (const [name, entry] of (hashSourceHandle as any).entries()) {
+  for await (const [name] of (hashSourceHandle as any).entries()) {
         if (count >= 40) break;
         for (let i = 0; i < name.length; i++) acc = ((acc << 5) + acc) + name.charCodeAt(i);
         count++;
@@ -872,21 +711,9 @@ function App() {
   await boxService.removeByGraph(syntheticId);
     setCurrentGraph(syntheticId);
   setCurrentDirHandle(pagesHandle!);
-    setGraphMode('folder');
   }, [currentGraph, t]);
 
-  // 初回モード選択ダイアログのハンドラ
-  const chooseLogseqMode = useCallback(async () => {
-    setModeChosen(true);
-    setGraphMode('logseq');
-    try {
-      const { currentGraph, preferredDateFormat, preferredLanguage, preferredFormat } = await logseq.App.getUserConfigs();
-      setCurrentGraph(currentGraph);
-      setPreferredDateFormat(preferredDateFormat);
-      setPreferredFormat(preferredFormat);
-      i18n.changeLanguage(preferredLanguage);
-    } catch {/* ignore */}
-  }, []);
+  // Logseq モード選択は廃止
 
   const chooseFolderMode = useCallback(async () => {
     try {
@@ -895,32 +722,9 @@ function App() {
     } catch {/* user cancelled or failed; keep dialog open */}
   }, [openDirectoryPicker]);
 
-  // モード切替ボタンハンドラ
-  const handleToggleMode = useCallback(async () => {
-    if (graphMode === 'logseq') {
-      // フォルダを選択して folder モードへ
-      await openDirectoryPicker();
-      return;
-    }
-    // Logseq モードへ戻す
-    try {
-      const { currentGraph: cg } = await logseq.App.getUserConfigs();
-      if (cg) setCurrentGraph(cg);
-      setGraphMode('logseq');
-      setCurrentDirHandle(dirHandles[cg] || undefined);
-    } catch {/* ignore */}
-  }, [graphMode, openDirectoryPicker]);
+  // モード切替は廃止
 
-  const boxOnClick = async (box: Box, e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.nativeEvent.shiftKey && !detachedMode && box.graph === currentGraph) {
-      // Shift-click: open directly in Logseq main page (only when attached)
-      logseq.App.pushState('page', { name: box.name });
-      logseq.hideMainUI({ restoreEditingCursor: true });
-    } else {
-      // Normal click: open inside plugin sidebar (only if same graph or attached mode)
-      void openInSidebar(box);
-    }
-  };
+  const boxOnClick = async (box: Box) => { void openInSidebar(box); };
 
   const toggleArchive = useCallback(async (box: Box, next: boolean) => {
     try {
@@ -954,7 +758,7 @@ function App() {
     }
   }, [currentGraph]);
 
-  const displayTitle = (name: string) => displayTitleUtil(name, graphMode, journalDatePattern);
+  const displayTitle = (name: string) => displayTitleUtil(name, 'folder', journalDatePattern);
   const journalDayWeek = (name: string) => (isJournalName(name) ? journalDayWeekUtil(name) : displayTitle(name));
 
   // toJournalPageNameIfDate は BlockList 内で使用するため、関数自体はモジュールスコープ版を下部に定義。
@@ -982,7 +786,6 @@ function App() {
         }
       }
       try {
-        // @ts-ignore
         for await (const [entryName, entry] of (dir as any).entries()) {
           if (!entryName || entry.kind !== 'file' || !/\.(md|org)$/i.test(entryName)) continue;
           const base = entryName.replace(/\.(md|org)$/i,'');
@@ -1021,11 +824,7 @@ function App() {
   };
 
   // cardboxes から journals と non-journals を分離し journals を日時降順ソート
-  const journalBoxes = useMemo(() => {
-    if (!cardboxes) return [] as Box[];
-    return [...cardboxes.filter(b => isJournalName(b.name))]
-      .sort((a,b) => journalDateValue(b.name) - journalDateValue(a.name) || (b.time - a.time)); // 日付降順, 同日は time
-  }, [cardboxes]);
+  // journalBoxes は useLiveQuery で取得済み
 
   // Journals lazy state
   const [journalLimit, setJournalLimit] = useState(60);
@@ -1042,7 +841,7 @@ function App() {
     type G = { key: string; label: string; items: Box[] };
     const map = new Map<string, G>();
     const fmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'long' });
-    for (const j of visibleJournals) {
+  for (const j of visibleJournals) {
       if (!hasNonTrivialSummary(j)) continue;
       const decoded = j.name.replace(/%2F/gi,'/').replace(/^journals\//,'').replace(/\.(md|org)$/i,'');
       const m = decoded.match(/^(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
@@ -1063,11 +862,10 @@ function App() {
     }
     // sort groups descending by key (YYYY-MM)
     return Array.from(map.values()).sort((a,b)=> b.key.localeCompare(a.key));
-  }, [visibleJournals]);
-  const nonJournalBoxes = useMemo(() => {
-    if (!cardboxes) return [] as Box[];
-    return cardboxes.filter(b => !isJournalName(b.name));
-  }, [cardboxes]);
+  }, [visibleJournals, graphMode]);
+  const nonJournalBoxes = useMemo(() => nonJournalBase || [], [nonJournalBase]);
+
+  const hasNonTrivialSummary = useCallback((box?: Box) => !!box && (box.summary || []).some(l => { const t=(l||'').trim(); return t && t !== '-'; }), []);
 
   // メイン一覧は常に非ジャーナルのみ（ジャーナルは下部セクションへ）。
   const visibleMainBoxes = useMemo(() => {
@@ -1086,16 +884,22 @@ function App() {
       }
       return false;
     };
-    // 除外解除: サマリ有無でのフィルタを廃止し、名称一致のみで表示
-    return nonJournalBoxes.filter(b => matchName(b));
-  }, [nonJournalBoxes, pageName]);
+    // 本文空カードは下部の EMPTY リストへ移すため、ここでは除外
+    return nonJournalBoxes.filter(b => hasNonTrivialSummary(b) && matchName(b));
+  }, [nonJournalBoxes, pageName, hasNonTrivialSummary]);
 
   // 全体カウント: 空サマリ ('' だけ / '-' だけ) を除外し Journals とその他を分離
   const nonJournalCount = visibleMainBoxes.length;
   const journalCount = useMemo(() => {
-    const hasNonTrivialSummary = (box?: Box) => !!box && (box.summary || []).some(l => { const t=(l||'').trim(); return t && t !== '-'; });
-    return journalBoxes.filter(b => hasNonTrivialSummary(b)).length;
-  }, [journalBoxes]);
+    return journalBoxesDedupe.filter(b => hasNonTrivialSummary(b)).length;
+  }, [journalBoxesDedupe, hasNonTrivialSummary]);
+
+  // EMPTY リスト（本文が空のカード）
+  const emptyBoxes = useMemo(() => {
+    const empty = (box?: Box) => !hasNonTrivialSummary(box);
+    const all = [...(nonJournalBoxes || []), ...(journalBoxesDedupe || [])];
+    return all.filter(empty).sort((a,b)=> b.time - a.time);
+  }, [nonJournalBoxes, journalBoxesDedupe, hasNonTrivialSummary]);
 
   const boxElements = (
     <CardList
@@ -1103,7 +907,7 @@ function App() {
       currentGraph={currentGraph}
       preferredDateFormat={preferredDateFormat}
       onClick={boxOnClick}
-      displayNameFor={(b)=>displayTitle(b.name)}
+  displayNameFor={(b)=>displayTitle(b.name)}
       keyPrefix='main'
       wrapper={false}
       isSelected={(_, idx)=> selectedBox === idx}
@@ -1116,8 +920,8 @@ function App() {
     tileRef,
     selectedBoxRef,
     setSelectedBox,
-    visibleMainBoxes: visibleMainBoxes as any,
-    openInSidebar: openInSidebar as any,
+  visibleMainBoxes: visibleMainBoxes,
+  openInSidebar: openInSidebar,
   });
 
   // Open a page by name in a new/activated preview tab
@@ -1153,19 +957,16 @@ function App() {
   // (removed duplicate visibleMainBoxes / misplaced toggle)
   return (
     <>
-      {/* 初回モード選択ダイアログ */}
+      {/* 初回フォルダ選択ダイアログ */}
       <Dialog open={!modeChosen} onClose={()=>{}} maxWidth='xs' fullWidth>
-        <DialogTitle>{t('mode-choose-title')}</DialogTitle>
+        <DialogTitle>{t('mode-choose-folder-desc') || 'Select a pages folder'}</DialogTitle>
         <DialogContent dividers>
           <div style={{display:'flex',flexDirection:'column',gap:12}}>
-            <div>{t('mode-choose-desc')}</div>
-            <div style={{fontSize:12,opacity:.75}}>{t('mode-choose-logseq-desc')}</div>
-            <div style={{fontSize:12,opacity:.75}}>{t('mode-choose-folder-desc')}</div>
+            <div>{t('mode-choose-folder-desc') || 'Choose your Logseq graph root (or pages folder).'}</div>
           </div>
         </DialogContent>
         <DialogActions>
-          <Button onClick={chooseLogseqMode} variant='outlined'>{t('mode-choose-logseq-btn')}</Button>
-          <Button onClick={chooseFolderMode} variant='contained'>{t('mode-choose-folder-btn')}</Button>
+          <Button onClick={chooseFolderMode} variant='contained'>{t('mode-choose-folder-btn') || 'Select folder'}</Button>
         </DialogActions>
       </Dialog>
       {modeChosen && cardsUpdating && (
@@ -1189,22 +990,11 @@ function App() {
               <SettingsIcon fontSize='small' />
             </IconButton>
           </Tooltip>
-          {(() => {
-            const pluginLabel = currentGraph ? (currentGraph.startsWith('fs_') ? currentGraph : currentGraph.replace('logseq_local_', '')) : '-';
-            const logseqLabel = logseqCurrentGraph ? logseqCurrentGraph.replace('logseq_local_', '') : '-';
-            return (
-              <div className='graph-info' title={`Plugin: ${pluginLabel}\nLogseq: ${logseqLabel}`}>
-                <span className='g-label'>{t('graph-label')}:</span>
-                <span className='g-section plugin'>P:<span className='g-name'>{pluginLabel}</span></span>
-                <span className='g-sep'>|</span>
-                <span className='g-section logseq'>L:<span className='g-name'>{logseqLabel}</span></span>
-                <span className='g-mode-badge' style={{ background: graphMode === 'folder' ? '#2d6' : '#268bd2', color: '#fff', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600 }} title={graphMode === 'folder' ? 'Folder Mode' : 'Logseq Mode'}>{graphMode === 'folder' ? 'FOLDER' : 'LOGSEQ'}</span>
-                <Button size='small' variant='outlined' style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, letterSpacing: 0.5, padding: '2px 8px' }} onClick={handleToggleMode} title={graphMode === 'logseq' ? 'Logseq モード → フォルダモードへ切替' : 'フォルダモード → Logseq モードへ切替'}>{graphMode === 'logseq' ? '→ Folder' : '→ Logseq'}</Button>
-                {detachedMode && <span className='badge-detached' title='Detached (graphs differ)'>DETACHED</span>}
-                {(currentGraph && logseqCurrentGraph && currentGraph !== logseqCurrentGraph) && <span className='g-mismatch' title='Graph mismatch'>&#9888;</span>}
-              </div>
-            );
-          })()}
+          <div className='graph-info'>
+            <span className='g-label'>{t('graph-label')}:</span>
+            <span className='g-section plugin'>P:<span className='g-name'>{currentGraph || '-'}</span></span>
+            <span className='g-mode-badge' style={{ background: '#2d6', color: '#fff', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600 }} title='Folder Mode'>FOLDER</span>
+          </div>
           {/* Exclude journals トグルは廃止 */}
           <Clear className='clear-btn' onClick={() => logseq.hideMainUI({ restoreEditingCursor: true })} style={{ cursor: 'pointer', float: 'right', marginTop: 10, marginRight: 24 }} />
         </div>
@@ -1212,7 +1002,7 @@ function App() {
   )}
   {modeChosen && (
   <PreviewTabs
-    previews={previews as any}
+    previews={previews.map(p => ({ box: { uuid: p.box.uuid, name: p.box.name }, pinned: p.pinned }))}
     activeIndex={activePreviewIndex}
     onActivate={setActivePreviewIndex}
     onTogglePin={(idx) => setPreviews(prev => prev.map((pp, i) => i === idx ? { ...pp, pinned: !pp.pinned } : pp))}
@@ -1233,11 +1023,7 @@ function App() {
             <Button size='small' variant='outlined' onClick={resetUiFont}>Reset</Button>
           </DialogTitle>
           <DialogContent dividers>
-            {/* Date formats */}
-            <div style={{display:'flex',flexWrap:'wrap',gap:16,marginBottom:20}}>
-              <TextField size='small' label={t('journal-date-format-label') || 'Journal Date Format'} value={journalDatePattern} onChange={e=> { const v = e.target.value.trim() || 'yyyy/MM/dd'; setJournalDatePattern(v); }} helperText={t('journal-date-format-help') || 'Tokens: yyyy MM dd'} style={{width:240}} />
-              {/* Journal link format (parse) 設定は廃止（自動判定） */}
-            </div>
+            {/* Date format setting removed */}
             {/* Font related settings */}
             <div style={{display:'flex',flexWrap:'wrap',gap:16}}>
               <TextField size='small' type='number' label='Font Size' value={uiFontSize} onChange={e=>{const v=parseInt(e.target.value,10); if(!isNaN(v)&&v>=8&&v<=40) setUiFontSize(v);}} style={{width:120}} />
@@ -1308,6 +1094,20 @@ function App() {
                   <button style={{ fontSize:11, padding:'4px 10px' }} onClick={loadMoreJournals}>Load more ({journalLimit}/{journalBoxes.length})</button>
                 </div>
               )}
+              {/* EMPTY: 本文が空のカード群（ジャーナル/非ジャーナル混在、常に一番下） */}
+              {emptyBoxes.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div className='journals-separator-label'>EMPTY</div>
+                  <CardList
+                    items={emptyBoxes}
+                    currentGraph={currentGraph}
+                    preferredDateFormat={preferredDateFormat}
+                    onClick={boxOnClick}
+                    displayNameFor={(b) => isJournalName(b.name) ? journalDayWeek(b.name) : displayTitle(b.name)}
+                    keyPrefix='empty'
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1335,6 +1135,8 @@ function App() {
               setHidePageRefs={setHidePageRefs}
               hideQueries={hideQueries}
               setHideQueries={setHideQueries}
+              hideRenderers={hideRenderers}
+              setHideRenderers={setHideRenderers}
               removeMacros={removeMacros}
               setRemoveMacros={setRemoveMacros}
               normalizeTasks={normalizeTasks}
@@ -1349,12 +1151,11 @@ function App() {
               currentGraph={currentGraph}
               preferredDateFormat={preferredDateFormat}
               assetsDirHandle={assetsDirHandle}
-              detachedMode={detachedMode}
 
               subpages={subpages}
               subpagesDeeper={subpagesDeeper}
               related={related}
-              onClickBox={(b) => boxOnClick(b as any, { nativeEvent: {} } as any)}
+              onClickBox={(b) => boxOnClick(b as any)}
 
               hoveredSidePane={hoveredSidePane}
               setHoveredSidePane={setHoveredSidePane}

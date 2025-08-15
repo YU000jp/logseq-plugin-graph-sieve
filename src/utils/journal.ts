@@ -19,19 +19,19 @@ export function formatDateByPattern(dt: Date, pattern: string): string {
   return pattern.replace(/yyyy/g, yyyy).replace(/MM/g, MM).replace(/dd/g, dd);
 }
 
-export function displayTitle(name: string, graphMode: 'logseq' | 'folder', journalDatePattern: string): string {
+export function displayTitle(name: string, _graphMode: 'logseq' | 'folder', journalDatePattern: string): string {
   const decoded = name.replace(/%2F/gi, '/');
-  if (graphMode === 'folder') {
-    const noExt = decoded.replace(/\.(md|org)$/i, '');
-    const journalMatch = noExt.match(/^(?:journals\/)?(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
-    if (journalMatch) {
-      const [, y, m, d] = journalMatch;
-      try {
-        const dt = new Date(Number(y), Number(m) - 1, Number(d));
-        return formatDateByPattern(dt, journalDatePattern);
-      } catch {
-        return `${y}/${m}/${d}`;
-      }
+  const noExt = decoded.replace(/\.(md|org)$/i, '');
+  const journalMatch = noExt.match(/^(?:journals\/)?(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
+  if (journalMatch) {
+    const [, y, m, d] = journalMatch;
+    try {
+      const dt = new Date(Number(y), Number(m) - 1, Number(d));
+      // 要件: Logseq MODE では表示のみユーザー指定のフォーマット
+      // Folder MODE でも同様の見た目整合性のため同一書式を返すが、内部名は不変
+      return formatDateByPattern(dt, journalDatePattern);
+    } catch {
+      return `${y}/${m}/${d}`;
     }
   }
   return decoded;

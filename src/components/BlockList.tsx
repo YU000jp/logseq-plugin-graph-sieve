@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { sanitizePlain as sanitizePlainUtil, isForcedHiddenPropLine as isForcedHiddenPropLineUtil, isOnlyRef as isOnlyRefUtil, isOnlyEmbed as isOnlyEmbedUtil } from '../utils/content';
-import { inferJournalPageNameFromText } from '../utils/journal';
 import type { BlockNode } from '../utils/blockText';
 
-export function hasRenderableContent(blocks: BlockNode[], hideProperties: boolean, hideReferences: boolean, alwaysHideKeys: string[] = [], hidePageRefs = false, hideQueries = false, removeStrings: string[] = []): boolean {
+export function hasRenderableContent(blocks: BlockNode[], hideProperties: boolean, hideReferences: boolean, alwaysHideKeys: string[] = [], hidePageRefs = false, hideQueries = false, removeStrings: string[] = [], hideRenderers: boolean = false): boolean {
   const check = (arr: BlockNode[]): boolean => {
     for (const b of arr) {
       const raw = (b.content || '')
@@ -19,7 +18,8 @@ export function hasRenderableContent(blocks: BlockNode[], hideProperties: boolea
       for (const l of raw) {
         if (isForcedHiddenPropLineUtil(l, alwaysHideKeys)) continue;
         if (hideProperties && l.includes(':: ')) continue;
-        if (hideQueries && /\{\{\s*query\b/i.test(l)) continue;
+  if (hideQueries && /\{\{\s*query\b/i.test(l)) continue;
+  if (hideRenderers && /\{\{\s*renderer\b/i.test(l)) continue;
         let transformed = l;
         if (hidePageRefs) transformed = transformed.replace(/\[\[([^\]]+)\]\]/g, '$1');
         if (transformed.trim().length === 0) continue;
@@ -35,7 +35,7 @@ export function hasRenderableContent(blocks: BlockNode[], hideProperties: boolea
   return check(blocks);
 }
 
-export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; currentGraph?: string; onOpenPage?: (name: string) => void; folderMode?: boolean; stripPageBrackets?: boolean; hidePageRefs?: boolean; hideQueries?: boolean; assetsDirHandle?: FileSystemDirectoryHandle; removeStrings?: string[]; normalizeTasks?: boolean }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], currentGraph, onOpenPage, folderMode, stripPageBrackets, hidePageRefs, hideQueries, assetsDirHandle, removeStrings = [], normalizeTasks = false }) => {
+export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; currentGraph?: string; onOpenPage?: (name: string) => void; folderMode?: boolean; stripPageBrackets?: boolean; hidePageRefs?: boolean; hideQueries?: boolean; hideRenderers?: boolean; assetsDirHandle?: FileSystemDirectoryHandle; removeStrings?: string[]; normalizeTasks?: boolean }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], currentGraph, onOpenPage, folderMode, stripPageBrackets, hidePageRefs, hideQueries, hideRenderers = false, assetsDirHandle, removeStrings = [], normalizeTasks = false }) => {
   const { t } = useTranslation();
   const sanitize = (s?: string) => sanitizePlainUtil(s, { removeStrings, hideProperties, alwaysHideKeys });
   const [assetUrls, setAssetUrls] = useState<Record<string,string>>({});
@@ -104,8 +104,6 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
       const before = line.slice(lastIndex, m.index);
       if (before) withLinks.push(before);
       let name = m[1];
-  const j = inferJournalPageNameFromText(name);
-      if (j) name = j;
       const looksUrl = /(^|\s)([a-zA-Z]+:\/\/|www\.)/.test(name);
       if (looksUrl) {
         withLinks.push(m[0]);
@@ -126,7 +124,8 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
     if (stripPageBrackets) {
       for (let i = 0; i < withLinks.length; i++) if (typeof withLinks[i] === 'string') withLinks[i] = (withLinks[i] as string).replace(/\[\[([^\]]+)\]\]/g,'$1');
     }
-    if (hideQueries && /\{\{\s*query\b/i.test(line)) return <div key={idx} className='ls-block-line'/>;
+  if (hideQueries && /\{\{\s*query\b/i.test(line)) return <div key={idx} className='ls-block-line'/>;
+  if (hideRenderers && /\{\{\s*renderer\b/i.test(line)) return <div key={idx} className='ls-block-line'/>;
 
     const withMdLinks: Array<React.ReactNode> = [];
     const getAssetUrl = (p: string): string | null => {
@@ -138,8 +137,8 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
     };
     const processMdLinks = (chunk: string, baseKey: string) => {
       let cursor = 0;
-      const mdRe = /\[([^\]]+)\]\(([^)]+)\)/g;
-      const orgRe = /\[\[([^\]]+)\](?:\[([^\]]*)\])?\]/g;
+  const mdRe = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const orgRe = /\[\[([^\]]+)\](?:\[([^\]]*)\])?\]/g;
       const isExternal = (u: string) => /^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/|www\.|mailto:|tel:|ftp:|file:|about:|data:|blob:|chrome:|edge:|opera:)/.test(u);
       while (true) {
         mdRe.lastIndex = cursor; orgRe.lastIndex = cursor;
@@ -152,7 +151,6 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
         if (start > cursor) withMdLinks.push(chunk.slice(cursor, start));
         if (next.type === 'md') {
           const text = next.m[1]; let href = next.m[2];
-          const j = inferJournalPageNameFromText(href); if (j) href = j;
           if (href.startsWith('../assets/')) {
             const assetHref = getAssetUrl(href) || href;
             withMdLinks.push(<a key={`${baseKey}-md-${start}`} href={assetHref} target='_blank' rel='noopener noreferrer' className='ls-asset-link' title={text}>{text}</a>);
@@ -171,7 +169,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
           }
           cursor = start + next.m[0].length;
         } else {
-          let url = next.m[1]; const j2 = inferJournalPageNameFromText(url); if (j2) url = j2;
+          let url = next.m[1];
           const text = next.m[2] || next.m[1];
           if (url.startsWith('../assets/')) {
             const assetHref = getAssetUrl(url) || url;
@@ -318,6 +316,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
                 let processedLine = ln;
                 if (removeStrings && removeStrings.length) for (const rs of removeStrings) if (rs) processedLine = processedLine.split(rs).join('');
                 if (hideQueries && /\{\{\s*query\b/i.test(processedLine)) return null;
+                if (hideRenderers && /\{\{\s*renderer\b/i.test(processedLine)) return null;
                 if (folderMode) {
                   let processed = processedLine
                     .replace(/\(\([0-9a-fA-F-]{36}\)\)/g, '')
@@ -352,7 +351,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
               })}
             </div>
             {b.children && b.children.length > 0 && (
-              <BlockList blocks={b.children as BlockNode[]} hideProperties={hideProperties} hideReferences={hideReferences} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={onOpenPage} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} />
+              <BlockList blocks={b.children as BlockNode[]} hideProperties={hideProperties} hideReferences={hideReferences} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={onOpenPage} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} hideRenderers={hideRenderers} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} />
             )}
           </li>
         );

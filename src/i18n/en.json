@@ -1,27 +1,20 @@
 {
-    "rebuild": "Rebuild",
-    "open-pages-btn": "Select pages folder",
-    "open-pages-btn-label": "Please select the pages folder in the Logseq graph storage folder." ,
     "footer": "Empty pages are not displayed. Click or move the cursor and press Enter to open the page.",
     "loading" : "Building...",
     "please-select-pages": "Select the folder named 'pages'",
-    "filter-by-page-tag": "Filter by Page Tag",
-        "filter-by-page-name": "Filter by Page Name",
+    "filter-by-page-name": "Filter by Page Name",
     "cancel": "Cancel",
     "tab-content": "Content",
     "tab-no-markdown": "No Markdown",
     "tab-raw": "RAW",
-    "tab-raw-custom": "RAW-custom",
-    "tab-info": "Info",
     "toggle-hide-properties": "Hide properties",
-    "toggle-hide-refs": "Hide refs/embeds",
     "toggle-strip-page-brackets": "Strip [[ ]] brackets",
     "toggle-page-links": "Enable page links",
     "toggle-hide-page-refs": "Hide page refs",
     "toggle-hide-queries": "Hide queries",
+    "toggle-hide-renderers": "Hide renderers",
     "always-hide-props": "Always hide properties",
     "always-hide-props-ph": "e.g. author,source",
-    "open-in-logseq": "Open in Logseq",
     "close": "Close",
     "sidebar-placeholder": "Select a card to preview here",
     "loading-content": "Loading...",
@@ -29,39 +22,23 @@
     "copy-content": "Copy content",
     "copied": "Copied",
     "copy-failed": "Copy failed",
-    "file-modified": "File modified",
-    "backlinks": "Backlinks",
     "related": "Related",
     "subpages": "Sub pages",
     "subpages-deeper-notice": "(No direct children. Showing deeper descendant pages.)",
     "favorites": "Favorites",
-    
     "favorite": "Favorite",
     "unfavorite": "Unfavorite",
-    "close-all-tabs": "Close all tabs"
-        , "graph-label": "Graph",
-    "detached-mode": "Detached mode",
-    "detached-mode-hint": "Show pages from all graphs (cannot open directly in Logseq)",
-    "exclude-journals": "Exclude journals",
-    "exclude-journals-hint": "Toggle to include or exclude journal pages",
+    "close-all-tabs": "Close all tabs",
+    "graph-label": "Graph",
     "remove-strings": "Remove strings",
     "remove-strings-ph": "e.g. draft,TODO,foo",
-    "raw-toggle-full": "Full source",
-    "raw-toggle-summary": "Summary",
     "sample-text": "The quick brown fox jumps over the lazy dog 0123456789",
-    "note-fonts": "Note: If a weight not provided by Google Fonts is specified, a nearby available weight will be used automatically."
-    ,"journal-date-format-label": "Journal date format"
-    ,"journal-date-format-help": "Tokens: yyyy MM dd (default yyyy/MM/dd)"
-    ,"journal-link-format-label": "Journal link format (parse)"
-    ,"journal-link-format-help": "Used to parse links like 2023/01/17; tokens: yyyy MM dd"
-    ,"toggle-remove-macros": "Remove macros"
-    ,"toggle-normalize-tasks": "Normalize tasks"
-    ,"toggle-remove-macros-help": "Remove non-query macros like {{renderer ...}} or custom macros"
-    ,"toggle-normalize-tasks-help": "Convert task keywords (TODO, DOING, DONE, LATER, NOW, WAITING, CANCELLED) to markdown checkboxes"
-    ,"mode-choose-title": "Choose Mode"
-    ,"mode-choose-desc": "Select how to read your graph:"
-    ,"mode-choose-logseq-desc": "Logseq Mode: Use the currently opened Logseq graph."
-    ,"mode-choose-folder-desc": "Folder Mode: Pick a pages folder to browse without Logseq."
-    ,"mode-choose-logseq-btn": "Logseq Mode"
-    ,"mode-choose-folder-btn": "Folder Mode"
+    "note-fonts": "Note: If a weight not provided by Google Fonts is specified, a nearby available weight will be used automatically.",
+    "toggle-remove-macros": "Remove macros",
+    "toggle-normalize-tasks": "Normalize tasks",
+    "toggle-remove-macros-help": "Remove non-query macros like {{renderer ...}} or custom macros",
+    "toggle-normalize-tasks-help": "Convert task keywords (TODO, DOING, DONE, LATER, NOW, WAITING, CANCELLED) to markdown checkboxes",
+    "mode-choose-folder-desc": "Folder Mode: Pick a pages folder to browse without Logseq.",
+    "mode-choose-folder-btn": "Folder Mode",
+    "settings": "Settings"
 }
