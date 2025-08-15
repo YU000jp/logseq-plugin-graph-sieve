@@ -3,8 +3,6 @@
 
 Helper tool to extract and normalize plain text from a file‑based graph’s `pages` and `journals` folders using a simple card + preview interface.
 
-Currently supports Folder Mode only (Logseq Mode has been removed).
-
 </div>
 
 [日本語](./README.ja.md) | English
@@ -51,7 +49,6 @@ Settings are persisted to localStorage.
 - Remove strings (filter substrings from body and copy output)
 
 ## Limitations / Notes
-- Logseq Mode has been removed. Only Folder Mode (reading a graph folder) is supported.
 - Folder Mode does not fully reproduce Logseq’s hierarchy/metadata.
 - Whiteboards and temporary in‑progress files are ignored.
 - Some formatting may differ slightly from Logseq’s native rendering.
