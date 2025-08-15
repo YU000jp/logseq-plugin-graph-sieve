@@ -305,9 +305,9 @@
 }
 
 .sidebar-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
   padding: 8px 8px 8px 12px;
   border-bottom: 1px solid #e0e0e0;
   flex: 0 0 auto;
@@ -328,6 +328,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+  text-align: center;
+  justify-self: center;
 }
 
 .breadcrumb {
@@ -360,15 +362,33 @@
   min-height: 0;
 }
 
+.sidebar-left {
+  display: flex;
+  align-items: center;
+}
+.sidebar-header .header-close-btn .MuiSvgIcon-root {
+  font-size: 16px;
+}
+.sidebar-header .header-close-btn {
+  margin-right: 6px;
+}
+
 .sidebar-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .sidebar-row--tabs {
   justify-content: flex-start;
 }
+
+/* 設定アイコンをタブ行の右端に寄せるためのスペーサ（.tabs-spacer はグローバルでも使用） */
+.sidebar-tabs {
+  display: flex;
+  align-items: center;
+}
+.sidebar-tabs .tabs-spacer { flex: 1 1 auto; min-width: 0; }
 
 .sidebar-row--filters {
   justify-content: flex-start;
@@ -386,6 +406,22 @@
   display: flex;
   gap: 4px;
 }
+
+.small-text { font-size: 12px; }
+
+/* プレビュー設定エリアの文字を小さめに調整 */
+.sidebar-row--filters,
+.sidebar-row--options {
+  font-size: 12px;
+}
+.sidebar-row--filters .MuiFormControlLabel-label,
+.sidebar-row--options .MuiFormControlLabel-label { font-size: 12px; }
+.sidebar-row--options .MuiInputBase-input { font-size: 12px; padding-top: 4px; padding-bottom: 4px; }
+.sidebar-row--options .MuiFormLabel-root { font-size: 12px; }
+.sidebar-row--filters .MuiSwitch-root { transform: scale(0.9); }
+
+/* アクション類は明示的に右寄せ（フォールバック） */
+.sidebar-actions { margin-left: auto; justify-content: flex-end; }
 
 .prop-filter {
   margin-left: 8px;
@@ -405,7 +441,7 @@
   padding: 8px 12px 12px 12px;
   /* parent should not scroll; panes manage their own scroll */
   overflow: hidden; /* 内部テキストラッパーでスクロール */
-  user-select: text;
+  user-select: text; /* 本文は選択可 */
   flex: 1 1 auto;
   min-height: 0;
   display: flex;

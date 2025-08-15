@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, FormControlLabel, IconButton, Switch, TextField, Tooltip } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -56,7 +56,6 @@ export interface PreviewPaneProps {
   currentGraph: string;
   preferredDateFormat: string;
   assetsDirHandle?: FileSystemDirectoryHandle;
-  journalLinkPattern?: string;
   detachedMode: boolean;
 
   // Related content
@@ -105,8 +104,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
     removeStrings,
     currentGraph,
     preferredDateFormat,
-    assetsDirHandle,
-    journalLinkPattern,
+  assetsDirHandle,
     detachedMode,
   subpages,
   subpagesDeeper,
@@ -119,6 +117,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
   const folderMode = currentGraph.startsWith('fs_');
   const normalizeTaskLines = (text: string, enable: boolean) => normalizeTaskLinesUtil(text, enable);
   const removeMacroTokens = (text: string, enable: boolean, alsoQueries: boolean) => removeMacroTokensUtil(text, enable, alsoQueries);
+  const [copyHover, setCopyHover] = useState(false);
 
   // Breadcrumb builder
   const breadcrumb = useMemo(() => {
@@ -168,6 +167,11 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
   return (
     <div className={'sidebar-inner' + (sidebarBox.archived ? ' archived' : '')}>
       <div className='sidebar-header'>
+        <div className='sidebar-left'>
+          <Tooltip title={t('close') as string}>
+            <IconButton size='small' onClick={closeActivePreview} title={t('close')} className='header-close-btn'><Clear fontSize='small' /></IconButton>
+          </Tooltip>
+        </div>
         <div className='sidebar-title' title={displayTitle(sidebarBox.name)}>{breadcrumb}</div>
         <div className='sidebar-controls'>
           <Tooltip title={sidebarBox.favorite ? (t('unfavorite') || 'Unfavorite') : (t('favorite') || 'Favorite')}><IconButton size='small' onClick={() => toggleFavorite(sidebarBox, !sidebarBox.favorite)} aria-label='favorite-toggle'>{sidebarBox.favorite ? <StarIcon fontSize='small' style={{ color: '#f5b301' }} /> : <StarBorderIcon fontSize='small' />}</IconButton></Tooltip>
@@ -180,11 +184,11 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
             <Button size='small' variant={sidebarTab === 'content' ? 'contained' : 'text'} onClick={() => onSetTab('content')}>{t('tab-content')}</Button>
             <Button size='small' variant={sidebarTab === 'nomark' ? 'contained' : 'text'} onClick={() => onSetTab('nomark')}>{t('tab-no-markdown')}</Button>
             <Button size='small' variant={sidebarTab === 'outline' ? 'contained' : 'text'} onClick={() => onSetTab('outline')}>{t('tab-raw')}</Button>
+            <span className='tabs-spacer' />
+            <Tooltip title={(t('settings') as string) || 'Settings'}><IconButton size='small' onClick={() => onToggleSettings()} aria-label='toggle-settings'><SettingsIcon fontSize='small' color={showSidebarSettings ? 'primary' : 'inherit'} /></IconButton></Tooltip>
           </div>
-          <div className='spacer' />
-          <Tooltip title={(t('settings') as string) || 'Settings'}><IconButton size='small' onClick={() => onToggleSettings()} aria-label='toggle-settings'><SettingsIcon fontSize='small' color={showSidebarSettings ? 'primary' : 'inherit'} /></IconButton></Tooltip>
         </div>
-        {showSidebarSettings && <div className='sidebar-row sidebar-row--filters'>
+  {showSidebarSettings && <div className='sidebar-row sidebar-row--filters small-text'>
           <FormControlLabel className='prop-filter' disabled={false} control={<Switch size='small' checked={hideProperties} onChange={(_, v) => setHideProperties(v)} />} label={t('toggle-hide-properties')} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={stripPageBrackets} onChange={(_, v) => setStripPageBrackets(v)} />} label={t('toggle-strip-page-brackets') || 'Strip [[ ]]'} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={!hidePageRefs} onChange={(_, v) => setHidePageRefs(!v)} />} label={t('toggle-page-links') || t('toggle-hide-page-refs') || 'Page links'} />
@@ -192,13 +196,14 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
           <Tooltip title={t('toggle-remove-macros-help') || 'Remove {{macro ...}} constructs (except queries unless hidden)'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={removeMacros} onChange={(_, v) => setRemoveMacros(v)} />} label={t('toggle-remove-macros') || 'Remove macros'} /></span></Tooltip>
           <Tooltip title={t('toggle-normalize-tasks-help') || 'Convert TODO/DONE etc. to Markdown checkboxes'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={normalizeTasks} onChange={(_, v) => setNormalizeTasks(v)} />} label={t('toggle-normalize-tasks') || 'Normalize tasks'} /></span></Tooltip>
         </div>}
-        {showSidebarSettings && <div className='sidebar-row sidebar-row--options'>
+  {showSidebarSettings && <div className='sidebar-row sidebar-row--options small-text'>
           <TextField size='small' label={t('always-hide-props')} placeholder={t('always-hide-props-ph')} value={alwaysHidePropKeys} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { const v = e.target.value; setAlwaysHidePropKeys(v); setString('alwaysHideProps', v); }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px' }} />
           <TextField size='small' label={t('remove-strings')} placeholder={t('remove-strings-ph')} value={removeStringsRaw} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { setRemoveStringsRaw(e.target.value); }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px', marginLeft: '8px' }} />
         </div>}
         <div className='sidebar-row sidebar-row--actions'>
-          <div className='sidebar-actions'>
-            <Button size='small' variant='outlined' startIcon={<ContentCopy fontSize='small' />} disabled={(sidebarTab !== 'content' && sidebarTab !== 'nomark' && sidebarTab !== 'outline' && sidebarTab !== 'raw-custom') || sidebarLoading || !(sidebarBlocks && sidebarBlocks.length > 0)} onClick={async () => {
+          <div className='sidebar-actions' style={{ marginLeft: 'auto', justifyContent: 'flex-end' }}>
+            {(() => { const canCopy = !((sidebarTab !== 'content' && sidebarTab !== 'nomark' && sidebarTab !== 'outline' && sidebarTab !== 'raw-custom') || sidebarLoading || !(sidebarBlocks && sidebarBlocks.length > 0)); return (
+            <Button size='small' variant='outlined' startIcon={<ContentCopy fontSize='small' />} disabled={!canCopy} onMouseEnter={() => { if (canCopy) setCopyHover(true); }} onMouseLeave={() => setCopyHover(false)} onFocus={() => { if (canCopy) setCopyHover(true); }} onBlur={() => setCopyHover(false)} onClick={async () => {
               if (!sidebarBlocks) return;
               let text: string;
               if (sidebarTab === 'nomark') {
@@ -229,9 +234,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
                 else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
                 logseq.UI.showMsg(t('copied'));
               } catch (e) { console.error(e); logseq.UI.showMsg(t('copy-failed')); }
-            }}>{t('copy-content')}</Button>
+            }}>{t('copy-content')}</Button> ); })()}
             {(!detachedMode && sidebarBox && sidebarBox.graph === currentGraph) && <Button size='small' variant='outlined' onClick={() => { if (!sidebarBox) return; logseq.App.pushState('page', { name: sidebarBox.name }); logseq.hideMainUI({ restoreEditingCursor: true }); }}>{t('open-in-logseq')}</Button>}
-            <IconButton size='small' onClick={closeActivePreview} title={t('close')}><Clear fontSize='small' /></IconButton>
           </div>
         </div>
       </div>
@@ -257,10 +261,10 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
           return (
             <>
               <div className={'sidebar-pane sidebar-pane-main'} style={{ flex: mainFlex }}>
-                <div className='sidebar-main-text'>
+                <div className={'sidebar-main-text' + (copyHover ? ' copy-target-hover' : '')}>
                   {sidebarLoading ? <div className='sidebar-loading'>{t('loading-content')}</div> : sidebarTab === 'content' ? (() => {
                     const has = hasRenderableContent((sidebarBlocks || []) as BlockNode[], hideProperties, true, alwaysHideKeys, hidePageRefs, hideQueries, removeStrings);
-                    return (<>{has ? <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} journalLinkPattern={journalLinkPattern} /> : <div className='sidebar-empty'>{t('no-content')}</div>}</>);
+                    return (<>{has ? <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} /> : <div className='sidebar-empty'>{t('no-content')}</div>}</>);
                   })() : sidebarTab === 'nomark' ? <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} /> : sidebarTab === 'outline' ? <RawCustomView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} folderMode={folderMode} normalizeTasks={normalizeTasks} /> : null}
                 </div>
               </div>

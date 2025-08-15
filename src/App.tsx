@@ -22,7 +22,7 @@ import { boxService } from './services/boxService';
 import { getString, setString, getBoolean, setBoolean, getNumber, setNumber, remove as lsRemove } from './utils/storage';
 import type { MarkdownOrOrg, FileChanges } from './types';
 import CardList from './components/CardList';
-import { displayTitle as displayTitleUtil, journalDayWeek as journalDayWeekUtil } from './utils/journal';
+import { displayTitle as displayTitleUtil, journalDayWeek as journalDayWeekUtil, isJournalName as isJournalNameUtil } from './utils/journal';
 import PreviewTabs from './components/PreviewTabs';
 import PreviewPane from './components/PreviewPane';
 
@@ -43,9 +43,7 @@ function App() {
   // ジャーナル日付表示パターン (ユーザー設定可能)
   const [journalDatePattern, setJournalDatePattern] = useState<string>(() => getString('journalDatePattern', 'yyyy/MM/dd'));
   useEffect(()=>{ setString('journalDatePattern', journalDatePattern); }, [journalDatePattern]);
-  // ジャーナルリンク判定パターン（プレビュー内リンクをジャーナルとして解釈するための入力書式）
-  const [journalLinkPattern, setJournalLinkPattern] = useState<string>(() => getString('journalLinkPattern', 'yyyy/MM/dd'));
-  useEffect(()=>{ setString('journalLinkPattern', journalLinkPattern); }, [journalLinkPattern]);
+  // ジャーナルリンクのパースは自動判定へ統一（個別フォーマット設定は廃止）
   // グローバル設定（現在はプレースホルダ）
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   // ===== UI フォント設定 (再導入) =====
@@ -96,7 +94,6 @@ function App() {
   useEffect(() => { setNumber('maxPreviewTabs', maxPreviewTabs); }, [maxPreviewTabs]);
   const [hideProperties, setHideProperties] = useState<boolean>(() => getBoolean('hideProperties', true));
   // Refs/embeds は常に非表示 (トグル廃止) - 呼び出し側では true を直接渡す
-  // 空行除去: トグル廃止し常に有効（実装は各処理で空行除去）
   // [[Page]] 括弧だけ除去トグル（デフォルトON）
   const [stripPageBrackets, setStripPageBrackets] = useState<boolean>(() => getBoolean('stripPageBrackets', true));
   // Page refs 自体を非表示 (行から除去) （デフォルトOFF）
@@ -1012,7 +1009,7 @@ function App() {
   }, [currentGraph, journalsDirHandle]);
 
   // ジャーナル判定ヘルパ
-  const isJournalName = (name: string) => /^(?:journals\/)?(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/.test(name.replace(/%2F/gi, '/'));
+  const isJournalName = (name: string) => isJournalNameUtil(name);
 
   // ジャーナル日付 (ファイル名) から比較用数値 YYYYMMDD を取得 (失敗時は 0)
   const journalDateValue = (name: string) => {
@@ -1239,7 +1236,7 @@ function App() {
             {/* Date formats */}
             <div style={{display:'flex',flexWrap:'wrap',gap:16,marginBottom:20}}>
               <TextField size='small' label={t('journal-date-format-label') || 'Journal Date Format'} value={journalDatePattern} onChange={e=> { const v = e.target.value.trim() || 'yyyy/MM/dd'; setJournalDatePattern(v); }} helperText={t('journal-date-format-help') || 'Tokens: yyyy MM dd'} style={{width:240}} />
-              <TextField size='small' label={t('journal-link-format-label') || 'Journal Link Format'} value={journalLinkPattern} onChange={e=> { const v = e.target.value.trim() || 'yyyy/MM/dd'; setJournalLinkPattern(v); }} helperText={t('journal-link-format-help') || 'For parsing links: yyyy MM dd'} style={{width:260}} />
+              {/* Journal link format (parse) 設定は廃止（自動判定） */}
             </div>
             {/* Font related settings */}
             <div style={{display:'flex',flexWrap:'wrap',gap:16}}>
@@ -1352,7 +1349,6 @@ function App() {
               currentGraph={currentGraph}
               preferredDateFormat={preferredDateFormat}
               assetsDirHandle={assetsDirHandle}
-              journalLinkPattern={journalLinkPattern}
               detachedMode={detachedMode}
 
               subpages={subpages}
