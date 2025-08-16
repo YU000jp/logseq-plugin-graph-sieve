@@ -1052,9 +1052,13 @@ function App() {
   const hasPagesResults = pagesResults.length > 0;
   const hasJournalResults = filteredJournalsForResults.length > 0;
 
-  // Main Pages view mode: 'cards' | 'list'
+  // Main Pages view mode: 'cards' | 'list' (persisted separately)
   const [mainView, setMainView] = useState<'cards'|'list'>(() => (getString('mainViewMode','cards') as any) || 'cards');
   useEffect(()=>{ setString('mainViewMode', mainView); },[mainView]);
+
+  // Search Pages view mode: 'cards' | 'list' (independent from main)
+  const [searchView, setSearchView] = useState<'cards'|'list'>(() => (getString('searchPagesViewMode','cards') as any) || 'cards');
+  useEffect(()=>{ setString('searchPagesViewMode', searchView); }, [searchView]);
 
   // Non-search Pages section: reuse the same layout as search Pages
 
@@ -1305,8 +1309,8 @@ function App() {
                     <PagesSection
                     title={t('pages')}
                     items={pagesResults}
-                    mode={mainView}
-                    onChangeMode={setMainView}
+                    mode={searchView}
+                    onChangeMode={setSearchView}
                     currentGraph={currentGraph}
                     preferredDateFormat={preferredDateFormat}
                     onClickCard={boxOnClick}

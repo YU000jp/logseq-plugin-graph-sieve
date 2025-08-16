@@ -15,9 +15,9 @@ import HierarchyList from './HierarchyList';
 // Ensure the correct path to the Starfield component
 const Starfield = React.lazy(() => import('./Starfield')); // Update the path if necessary
 import ViewModeToggle from './ViewModeToggle';
+import { getString, setString } from '../utils/storage';
 import { PlainTextView, RawCustomView, blocksToPlainText, outlineTextFromBlocks, flattenBlocksToText, type BlockNode } from '../utils/blockText';
 import { normalizeTaskLines as normalizeTaskLinesUtil, removeMacroTokens as removeMacroTokensUtil } from '../utils/text';
-import { setString } from '../utils/storage';
 import { isJournalName } from '../utils/journal';
 import { useHoverPagePreview } from '../hooks/useHoverPagePreview';
 import { getOpenPageLinkProps } from '../utils/openLink';
@@ -214,9 +214,11 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
 
   const isJournalPreview = isJournalName(sidebarBox.name);
 
-  // View toggles for Subpages/Related: 'cards' | 'list'
-  const [subView, setSubView] = useState<'cards'|'list'>('cards');
-  const [relView, setRelView] = useState<'cards'|'list'>('cards');
+  // View toggles for Subpages/Related: 'cards' | 'list' (persisted independently)
+  const [subView, setSubView] = useState<'cards'|'list'>(() => (getString('subpagesViewMode','cards') as any) || 'cards');
+  const [relView, setRelView] = useState<'cards'|'list'>(() => (getString('relatedViewMode','cards') as any) || 'cards');
+  React.useEffect(()=>{ setString('subpagesViewMode', subView); }, [subView]);
+  React.useEffect(()=>{ setString('relatedViewMode', relView); }, [relView]);
 
   // Use shared HierarchyList for consistent list style (dim shared prefix, truncate tail)
 
