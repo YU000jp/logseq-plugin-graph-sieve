@@ -12,7 +12,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { Button, IconButton, InputAdornment, TextField, Tooltip, Chip, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import { Clear } from '@mui/icons-material';
 import SettingsIcon from '@mui/icons-material/Settings';
-import { encodeLogseqFileName, getSummaryFromRawText, decodeLogseqFileName } from './utils';
+import { getSummaryFromRawText } from './utils';
 import { parseBlocksFromText } from './utils/parseBlocks';
 // linkResolver は他所で使用。ここでは共通ロケーターを使用
 import { locatePageFile } from './utils/pageLocator';
@@ -179,35 +179,17 @@ function App() {
           for (const r of reEach) { if (!r) continue; const matches = text.match(r); if (matches) s += matches.length; }
           return s;
         };
-        const nextMap = new Map<string, number>();
-        const pagesHandle = dirHandles[currentGraph];
-        const chunkSize = 15; let idx = 0;
-        const tryLocate = async (dir: FileSystemDirectoryHandle | undefined, name: string) => {
-          if (!dir) return null as File | null;
-          const variants = [name, encodeLogseqFileName(name), name.replace(/\//g,'___')];
-          const exts = ['.md','.org'];
-          for (const v of variants) {
-            for (const ext of exts) {
-              const fh = await dir.getFileHandle(v + ext).catch(()=>null);
-              if (fh) { const f = await fh.getFile(); return f; }
-            }
-          }
-          return null;
-        };
+  const nextMap = new Map<string, number>();
+  const pagesHandle = dirHandles[currentGraph];
+  const chunkSize = 15; let idx = 0;
         const work = async (): Promise<void> => {
           const end = Math.min(idx + chunkSize, boxes.length);
           for (; idx < end; idx++) {
             if (bodySearchTokenRef.current !== token) return; // cancelled
             const b = boxes[idx];
             try {
-              let file: File | null = await tryLocate(pagesHandle, b.name);
-              if (!file && pagesHandle) {
-                const jh = await pagesHandle.getDirectoryHandle('journals').catch(()=>null);
-                if (jh) file = await tryLocate(jh as any, b.name);
-              }
-              if (!file && journalsDirHandle) {
-                file = await tryLocate(journalsDirHandle, b.name);
-              }
+              const located = await locatePageFile(b.name, pagesHandle, journalsDirHandle, { scanFallback: true });
+              const file: File | null = located?.file || null;
               if (!file) continue;
               const text = await file.text();
               const sc = scoreOf(text);
@@ -997,41 +979,12 @@ function App() {
     if (bodyTerms.length === 0) { setSnippetMap(new Map()); return; }
     const token = ++snippetTokenRef.current;
     const targets: Box[] = [...matchedMain, ...matchedJournals].slice(0, 300); // 上位のみ
-    const pagesHandle = dirHandles[currentGraph];
-    const esc = (s: string) => s.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+  const pagesHandle = dirHandles[currentGraph];
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
     const res = bodyTerms.map(t => { try { return new RegExp(esc(t), 'i'); } catch { return null as RegExp | null; } }).filter(Boolean) as RegExp[];
     const tryLocate = async (name: string): Promise<File | null> => {
-      const variants = [name, encodeLogseqFileName(name), name.replace(/\//g,'___')];
-      const exts = ['.md','.org'];
-      const tryInDir = async (dir: FileSystemDirectoryHandle | undefined): Promise<File | null> => {
-        if (!dir) return null;
-        for (const v of variants) {
-          for (const ext of exts) {
-            const fh = await dir.getFileHandle(v + ext).catch(()=>null);
-            if (fh) return fh.getFile();
-          }
-        }
-        // fallback decode scan
-        try {
-          // @ts-ignore
-          for await (const [entryName, entry] of (dir as any).entries()) {
-            if (!entryName || entry.kind !== 'file' || !/\.(md|org)$/i.test(entryName)) continue;
-            const base = entryName.replace(/\.(md|org)$/i,'');
-            if (decodeLogseqFileName(base) === name) {
-              const fh = await dir.getFileHandle(entryName).catch(()=>null);
-              if (fh) return fh.getFile();
-            }
-          }
-        } catch { /* ignore */ }
-        return null;
-      };
-      let f = await tryInDir(pagesHandle);
-      if (!f && pagesHandle) {
-        const jh = await pagesHandle.getDirectoryHandle('journals').catch(()=>null);
-        if (jh) f = await tryInDir(jh as any);
-      }
-      if (!f && journalsDirHandle) f = await tryInDir(journalsDirHandle);
-      return f;
+      const located = await locatePageFile(name, pagesHandle, journalsDirHandle, { scanFallback: true });
+      return located?.file || null;
     };
     const computeSnippet = (text: string): string | undefined => {
       const lines = text.split(/\r?\n/);
