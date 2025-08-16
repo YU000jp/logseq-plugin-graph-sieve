@@ -18,6 +18,7 @@ import { boxService } from './services/boxService';
 // query services are used within rebuildService
 import { getString, setString, getBoolean, setBoolean, getNumber, setNumber, remove as lsRemove } from './utils/storage';
 import CardList from './components/CardList';
+import PagesSection from './components/PagesSection';
 import { displayTitle as displayTitleUtil, journalDayWeek as journalDayWeekUtil, isJournalName as isJournalNameUtil } from './utils/journal';
 import PreviewTabs from './components/PreviewTabs';
 import PreviewPane from './components/PreviewPane';
@@ -33,7 +34,7 @@ function App() {
   const [assetsDirHandle, setAssetsDirHandle] = useState<FileSystemDirectoryHandle>();
   // ルート直下 (pages と siblings) に journals フォルダがある場合の参照
   const [journalsDirHandle, setJournalsDirHandle] = useState<FileSystemDirectoryHandle>();
-  const [currentGraph, setCurrentGraph] = useState<string>('');
+  const [currentGraph, setCurrentGraph] = useState<string>(() => getString('lastSyntheticGraph', ''));
   const [preferredDateFormat] = useState<string>('');
   // 日付/フォント設定機能削除に伴い固定スタイル & 既定日付書式を使用
   // 日付フォーマットは固定表示（設定項目削除）
@@ -58,6 +59,8 @@ function App() {
   const [cardsUpdating, setCardsUpdating] = useState<boolean>(false);
   const rebuildTokenRef = useRef<number>(0);
   const [selectedBox, setSelectedBox] = useState<number>(0);
+  // LOGBOOK を隠すトグル（既定: 有効）
+  const [hideLogbook, setHideLogbook] = useState<boolean>(true);
   // 選択カード参照 (キーボードハンドラ内で最新 index を参照するため)
   const selectedBoxRef = useRef<number>(0);
   useEffect(() => { selectedBoxRef.current = selectedBox; }, [selectedBox]);
@@ -151,11 +154,104 @@ function App() {
   // detachedMode は自動判定なので保存しない
   useEffect(() => { if (modeChosen) setString('graphMode', graphMode); }, [graphMode, modeChosen]);
 
+  // === 本文検索（高機能フィルタ） ===
+  const [bodyQuery, setBodyQuery] = useState<string>('');
+  const bodyTerms = useMemo(() => bodyQuery.trim().split(/\s+/).map(s => s.trim()).filter(Boolean), [bodyQuery]);
+  const [bodyMatchMap, setBodyMatchMap] = useState<Map<string, number>>(new Map()); // key: graph::name -> score
+  const bodySearchTokenRef = useRef(0);
+  const [bodySearchRunning, setBodySearchRunning] = useState(false);
+  useEffect(() => {
+    const run = async () => {
+      const token = ++bodySearchTokenRef.current;
+      if (!currentGraph || bodyTerms.length === 0) { setBodyMatchMap(new Map()); return; }
+      if (!currentGraph.startsWith('fs_')) { setBodyMatchMap(new Map()); return; }
+      setBodySearchRunning(true);
+      try {
+        const boxes = await boxService.allByGraph(currentGraph);
+        const esc = (s: string) => s.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+        const reEach = bodyTerms.map((t) => { try { return new RegExp(esc(t), 'gi'); } catch { return null as RegExp | null; } });
+        const scoreOf = (text: string): number => {
+          if (!text) return 0;
+          let s = 0;
+          for (const r of reEach) { if (!r) continue; const matches = text.match(r); if (matches) s += matches.length; }
+          return s;
+        };
+        const nextMap = new Map<string, number>();
+        const pagesHandle = dirHandles[currentGraph];
+        const chunkSize = 15; let idx = 0;
+        const tryLocate = async (dir: FileSystemDirectoryHandle | undefined, name: string) => {
+          if (!dir) return null as File | null;
+          const variants = [name, encodeLogseqFileName(name), name.replace(/\//g,'___')];
+          const exts = ['.md','.org'];
+          for (const v of variants) {
+            for (const ext of exts) {
+              const fh = await dir.getFileHandle(v + ext).catch(()=>null);
+              if (fh) { const f = await fh.getFile(); return f; }
+            }
+          }
+          return null;
+        };
+        const work = async (): Promise<void> => {
+          const end = Math.min(idx + chunkSize, boxes.length);
+          for (; idx < end; idx++) {
+            if (bodySearchTokenRef.current !== token) return; // cancelled
+            const b = boxes[idx];
+            try {
+              let file: File | null = await tryLocate(pagesHandle, b.name);
+              if (!file && pagesHandle) {
+                const jh = await pagesHandle.getDirectoryHandle('journals').catch(()=>null);
+                if (jh) file = await tryLocate(jh as any, b.name);
+              }
+              if (!file && journalsDirHandle) {
+                file = await tryLocate(journalsDirHandle, b.name);
+              }
+              if (!file) continue;
+              const text = await file.text();
+              const sc = scoreOf(text);
+              if (sc > 0) nextMap.set(`${b.graph}::${b.name}`, sc);
+            } catch { /* ignore */ }
+          }
+          if (bodySearchTokenRef.current !== token) return;
+          setBodyMatchMap(new Map(nextMap));
+          if (idx < boxes.length) {
+            if ((window as any).requestIdleCallback) {
+              (window as any).requestIdleCallback(() => { void work(); }, { timeout: 300 });
+            } else {
+              window.setTimeout(() => { void work(); }, 50);
+            }
+          } else {
+            setBodySearchRunning(false);
+          }
+        };
+        await work();
+      } catch {
+        setBodyMatchMap(new Map());
+        setBodySearchRunning(false);
+      }
+    };
+    void run();
+  }, [bodyTerms, currentGraph, journalsDirHandle]);
+
   // UI 表示時（ツールバーから開かれたとき等）は毎回モード選択から開始する
   useEffect(() => {
     const handler = ({ visible }: any) => {
       if (visible) {
-        setModeChosen(false);
+        // If cached synthetic graph exists, resume immediately; otherwise require folder selection
+        const last = getString('lastSyntheticGraph', '');
+        if (!last) { setModeChosen(false); return; }
+        (async () => {
+          try {
+            const items = await boxService.allByGraph(last);
+            if (items && items.length > 0) {
+              setCurrentGraph(last);
+              setModeChosen(true);
+            } else {
+              setModeChosen(false);
+            }
+          } catch {
+            setModeChosen(false);
+          }
+        })();
       }
     };
     logseq.on('ui:visible:changed', handler);
@@ -290,6 +386,7 @@ function App() {
   // Logseq 設定同期は不要（フォルダ専用）
 
   const rebuildDB = useCallback(async () => {
+    if (!currentDirHandle || !currentGraph.startsWith('fs_')) return; // require folder-mode handle
     await rebuildDatabase({
       currentGraph,
       currentDirHandle,
@@ -297,7 +394,6 @@ function App() {
       setLoading,
       setCardsUpdating,
       rebuildTokenRef,
-      // 調整可能なバッチ設定（必要に応じて変更可）
       batchSize: 100,
       batchSleepMs: 300,
     });
@@ -527,11 +623,6 @@ function App() {
   }, [activePreviewIndex]);
 
   const setActiveTab = (tab: PreviewTab) => {
-    // NO MARKDOWN を開いたときは、Hide properties / Hide refs を自動でONにする
-    if (tab === 'nomark') {
-      if (!hideProperties) setHideProperties(true);
-      // hideRefs は常時 true
-    }
     setPreviews(prev => {
       if (activePreviewIndex < 0 || activePreviewIndex >= prev.length) return prev;
       const arr = [...prev];
@@ -709,11 +800,12 @@ function App() {
         count++;
       }
     } catch {/* ignore */}
-    const hash = (acc >>> 0).toString(36).slice(0,8);
-    const syntheticId = `fs_${hash}`;
+  const hash = (acc >>> 0).toString(36).slice(0,8);
+  const syntheticId = `fs_${hash}`;
     dirHandles[syntheticId] = pagesHandle!;
   await boxService.removeByGraph(syntheticId);
     setCurrentGraph(syntheticId);
+  setString('lastSyntheticGraph', syntheticId);
     setCurrentDirHandle(pagesHandle!);
     pickingRef.current = false;
   }, [currentGraph, t]);
@@ -838,23 +930,37 @@ function App() {
   const visibleJournals = journalBoxes.slice(0, journalLimit);
   const loadMoreJournals = () => { if (journalLimit < journalBoxes.length) setJournalLimit(journalLimit + 60); };
   const [collapseJournals, setCollapseJournals] = useState(false);
+  // JOURNALS 年フィルター
+  const [journalsYearFilter, setJournalsYearFilter] = useState<string>('');
+  // 空でないサマリー判定（共通利用）
+  const hasNonTrivialSummary = useCallback((box?: Box) => !!box && (box.summary || []).some(l => { const t=(l||'').trim(); return t && t !== '-'; }), []);
+  const journalsAllYears = useMemo(() => {
+    const years = new Set<string>();
+    for (const j of journalBoxesDedupe) {
+      if (!hasNonTrivialSummary(j)) continue; // 表示対象がない年は候補に含めない
+      const decoded = j.name.replace(/%2F/gi,'/').replace(/^journals\//,'').replace(/\.(md|org)$/i,'');
+      const m = decoded.match(/^(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
+      if (m) years.add(m[1]);
+    }
+    return Array.from(years).sort((a,b)=> b.localeCompare(a));
+  }, [journalBoxesDedupe, hasNonTrivialSummary]);
   // Hover 中の補助ペイン識別 (sub/rel)
   const [hoveredSidePane, setHoveredSidePane] = useState<null | 'sub' | 'rel'>(null);
   // Journals collapse 永続化
   useEffect(() => { setBoolean('collapseJournals', collapseJournals); }, [collapseJournals]);
   useEffect(() => { const v = getString('collapseJournals', ''); if (v !== '') setCollapseJournals(v === 'true'); }, []);
-  const groupedJournals = useMemo(() => {
-    const hasNonTrivialSummary = (box?: Box) => !!box && (box.summary || []).some(l => { const t=(l||'').trim(); return t && t !== '-'; });
-    type G = { key: string; label: string; items: Box[] };
-    const map = new Map<string, G>();
+  type JournalGroup = { key: string; label: string; items: Box[] };
+  // hasNonTrivialSummary は上で定義
+
+  const groupJournalsByMonth = useCallback((source: Box[]): JournalGroup[] => {
+    const map = new Map<string, JournalGroup>();
     const fmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'long' });
-  for (const j of visibleJournals) {
-      if (!hasNonTrivialSummary(j)) continue;
+    for (const j of source) {
       const decoded = j.name.replace(/%2F/gi,'/').replace(/^journals\//,'').replace(/\.(md|org)$/i,'');
       const m = decoded.match(/^(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
       if (!m) continue;
       const [ , y, mo ] = m;
-      const key = `${y}-${mo}`; // stable key
+      const key = `${y}-${mo}`;
       let g = map.get(key);
       if (!g) {
         const dateObj = new Date(Number(y), Number(mo)-1, 1);
@@ -863,37 +969,58 @@ function App() {
       }
       g.items.push(j);
     }
-    // sort each group's items (desc by date value / time)
     for (const g of map.values()) {
       g.items.sort((a,b)=> journalDateValue(b.name) - journalDateValue(a.name) || (b.time - a.time));
     }
-    // sort groups descending by key (YYYY-MM)
     return Array.from(map.values()).sort((a,b)=> b.key.localeCompare(a.key));
-  }, [visibleJournals, graphMode]);
+  }, []);
+
+  const groupedJournals = useMemo(() => {
+    // 年で絞り込まれている場合は、可視上限に関わらず全件から該当年を表示
+    const base = journalsYearFilter ? journalBoxesDedupe : visibleJournals;
+    const source = base
+      .filter(j => hasNonTrivialSummary(j))
+      .filter(j => {
+        if (!journalsYearFilter) return true;
+        const decoded = j.name.replace(/%2F/gi,'/').replace(/^journals\//,'').replace(/\.(md|org)$/i,'');
+        const m = decoded.match(/^(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
+        return !!m && m[1] === journalsYearFilter;
+      });
+    return groupJournalsByMonth(source);
+  }, [visibleJournals, journalsYearFilter, groupJournalsByMonth, hasNonTrivialSummary, journalBoxesDedupe]);
   const nonJournalBoxes = useMemo(() => nonJournalBase || [], [nonJournalBase]);
 
-  const hasNonTrivialSummary = useCallback((box?: Box) => !!box && (box.summary || []).some(l => { const t=(l||'').trim(); return t && t !== '-'; }), []);
+  // moved above (shared)
+
+  // タイトル検索用トークン（スペース区切り）
+  const nameTerms = useMemo(() => pageName.trim().split(/\s+/).map(s => s.trim()).filter(Boolean), [pageName]);
 
   // メイン一覧は常に非ジャーナルのみ（ジャーナルは下部セクションへ）。
   const visibleMainBoxes = useMemo(() => {
-    const q = pageName.trim().toLowerCase();
-    const matchName = (b: Box) => {
-      if (!q) return true;
-      // 候補: 元の内部名 / displayTitle (日付やデコード後) / アンダースコア・ハイフンをスペース化
-      const raw = (b.name||'');
-      const disp = displayTitle(b.name);
-      const variants = [raw, disp];
-      for (const v of variants) {
-        const lower = v.toLowerCase();
-        if (lower.includes(q)) return true;
-        const spaced = lower.replace(/[_-]+/g,' ');
-        if (spaced.includes(q)) return true;
-      }
-      return false;
+    const qTerms = pageName.trim().split(/\s+/).filter(Boolean).map(s => s.toLowerCase());
+    const matchTitle = (b: Box) => {
+      if (qTerms.length === 0) return true;
+      const raw = (b.name||'').toLowerCase();
+      const disp = displayTitle(b.name).toLowerCase();
+      const spaced = raw.replace(/[_-]+/g,' ');
+      return qTerms.some(q => raw.includes(q) || disp.includes(q) || spaced.includes(q));
     };
-    // 本文空カードは下部の EMPTY リストへ移すため、ここでは除外
-    return nonJournalBoxes.filter(b => hasNonTrivialSummary(b) && matchName(b));
-  }, [nonJournalBoxes, pageName, hasNonTrivialSummary]);
+    // 本文空カードは EMPTY へ回すので除外
+    const base = nonJournalBoxes.filter(b => hasNonTrivialSummary(b) && matchTitle(b));
+    if (bodyTerms.length === 0) return base;
+    // 本文マッチを優先表示（スコア降順、同点は time 降順）
+    const scored = base.slice().sort((a, b) => {
+      const ka = `${a.graph}::${a.name}`; const kb = `${b.graph}::${b.name}`;
+      const sa = bodyMatchMap.get(ka) || 0; const sb = bodyMatchMap.get(kb) || 0;
+      if (sa === sb) return (b.time - a.time);
+      return sb - sa;
+    });
+    return scored;
+  }, [nonJournalBoxes, pageName, hasNonTrivialSummary, bodyTerms.length, bodyMatchMap]);
+
+  // 二段表示は廃止（bodyTerms 入力時は matchedBoxes のみを元のカードグリッドに表示）
+
+  // 旧 summary ベースのスニペット生成はフルテキスト版に置き換え済み
 
   // 全体カウント: 空サマリ ('' だけ / '-' だけ) を除外し Journals とその他を分離
   const nonJournalCount = visibleMainBoxes.length;
@@ -908,18 +1035,209 @@ function App() {
     return all.filter(empty).sort((a,b)=> b.time - a.time);
   }, [nonJournalBoxes, journalBoxesDedupe, hasNonTrivialSummary]);
 
-  const boxElements = (
-    <CardList
-      items={visibleMainBoxes}
-      currentGraph={currentGraph}
-      preferredDateFormat={preferredDateFormat}
-      onClick={boxOnClick}
-  displayNameFor={(b)=>displayTitle(b.name)}
-      keyPrefix='main'
-      wrapper={false}
-      isSelected={(_, idx)=> selectedBox === idx}
-    />
-  );
+  // タイトル検索ヘルパ（pageName でのフィルタ用）
+  const titleMatchesQuery = useCallback((b: Box, q: string) => {
+    if (!q) return true;
+    const lowerQ = q.trim().toLowerCase(); if (!lowerQ) return true;
+    const raw = (b.name || '');
+    const disp = displayTitle(b.name);
+    const variants = [raw, disp];
+    for (const v of variants) {
+      const lower = v.toLowerCase();
+      if (lower.includes(lowerQ)) return true;
+      const spaced = lower.replace(/[_-]+/g, ' ');
+      if (spaced.includes(lowerQ)) return true;
+    }
+    return false;
+  }, []);
+
+  // 本文検索のヒット一覧（Journalsを含む）
+  const matchedBoxes = useMemo(() => {
+    const all = [...nonJournalBoxes, ...journalBoxesDedupe];
+    const termsLower = bodyTerms.map(s => s.toLowerCase());
+    const list: Array<{ box: Box; score: number }> = [];
+    for (const b of all) {
+      const key = `${b.graph}::${b.name}`;
+      const sc = bodyMatchMap.get(key) || 0;
+      const raw = (b.name || '').toLowerCase();
+      const disp = displayTitle(b.name).toLowerCase();
+      const spaced = raw.replace(/[_-]+/g, ' ');
+      // タイトル照合は pageName の語で行う
+      const titleQueryTerms = pageName.trim().split(/\s+/).filter(Boolean).map(s => s.toLowerCase());
+      const termsForTitle = titleQueryTerms.length ? titleQueryTerms : termsLower;
+      const titleHit = termsForTitle.some(w => raw.includes(w) || disp.includes(w) || spaced.includes(w));
+      if ((bodyTerms.length > 0 && sc > 0) || titleHit) {
+        const eff = sc + (titleHit ? 0.5 : 0);
+        list.push({ box: b, score: eff });
+      }
+    }
+    // スコア降順、同点は更新時刻降順
+    list.sort((a, b) => (b.score === a.score ? (b.box.time - a.box.time) : (b.score - a.score)));
+    return list.map(x => x.box);
+  }, [nonJournalBoxes, journalBoxesDedupe, bodyTerms.length, bodyMatchMap, pageName]);
+
+  // 検索結果を非ジャーナル/ジャーナルに分割
+  const matchedMain = useMemo(() => matchedBoxes.filter(b => !isJournalName(b.name)), [matchedBoxes]);
+  const matchedJournals = useMemo(() => {
+    const arr = matchedBoxes.filter(b => isJournalName(b.name));
+    return arr.sort((a,b)=> journalDateValue(b.name) - journalDateValue(a.name) || (b.time - a.time));
+  }, [matchedBoxes]);
+
+  // フルテキストからスニペット抽出（検索語の周辺行を拾う）
+  const [snippetMap, setSnippetMap] = useState<Map<string, string>>(new Map());
+  const snippetTokenRef = useRef(0);
+  useEffect(() => {
+    if (bodyTerms.length === 0) { setSnippetMap(new Map()); return; }
+    const token = ++snippetTokenRef.current;
+    const targets: Box[] = [...matchedMain, ...matchedJournals].slice(0, 300); // 上位のみ
+    const pagesHandle = dirHandles[currentGraph];
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+    const res = bodyTerms.map(t => { try { return new RegExp(esc(t), 'i'); } catch { return null as RegExp | null; } }).filter(Boolean) as RegExp[];
+    const tryLocate = async (name: string): Promise<File | null> => {
+      const variants = [name, encodeLogseqFileName(name), name.replace(/\//g,'___')];
+      const exts = ['.md','.org'];
+      const tryInDir = async (dir: FileSystemDirectoryHandle | undefined): Promise<File | null> => {
+        if (!dir) return null;
+        for (const v of variants) {
+          for (const ext of exts) {
+            const fh = await dir.getFileHandle(v + ext).catch(()=>null);
+            if (fh) return fh.getFile();
+          }
+        }
+        // fallback decode scan
+        try {
+          // @ts-ignore
+          for await (const [entryName, entry] of (dir as any).entries()) {
+            if (!entryName || entry.kind !== 'file' || !/\.(md|org)$/i.test(entryName)) continue;
+            const base = entryName.replace(/\.(md|org)$/i,'');
+            if (decodeLogseqFileName(base) === name) {
+              const fh = await dir.getFileHandle(entryName).catch(()=>null);
+              if (fh) return fh.getFile();
+            }
+          }
+        } catch { /* ignore */ }
+        return null;
+      };
+      let f = await tryInDir(pagesHandle);
+      if (!f && pagesHandle) {
+        const jh = await pagesHandle.getDirectoryHandle('journals').catch(()=>null);
+        if (jh) f = await tryInDir(jh as any);
+      }
+      if (!f && journalsDirHandle) f = await tryInDir(journalsDirHandle);
+      return f;
+    };
+    const computeSnippet = (text: string): string | undefined => {
+      const lines = text.split(/\r?\n/);
+      const picks: string[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        const L = lines[i];
+        if (res.some(r => r.test(L))) {
+          const chunk = [lines[i-1]].filter(Boolean).concat([L]).concat([lines[i+1]].filter(Boolean)).join('\n');
+          picks.push(chunk);
+          if (picks.length >= 3) break;
+        }
+      }
+      return picks.length ? picks.join('\n—\n') : undefined;
+    };
+    (async () => {
+      const next = new Map<string, string>();
+      for (const b of targets) {
+        if (snippetTokenRef.current !== token) return; // cancelled
+        try {
+          const f = await tryLocate(b.name);
+          if (!f) continue;
+          const txt = await f.text();
+          const snip = computeSnippet(txt);
+          if (snip) next.set(`${b.graph}::${b.name}`, snip);
+        } catch { /* ignore */ }
+      }
+      if (snippetTokenRef.current === token) setSnippetMap(next);
+    })();
+  }, [bodyTerms.join('|'), matchedMain, matchedJournals, currentGraph, journalsDirHandle]);
+
+  const getSnippetFullText = useCallback((box: Box): string | undefined => {
+    const key = `${box.graph}::${box.name}`;
+    return snippetMap.get(key);
+  }, [snippetMap]);
+
+  const [journalYearFilter, setJournalYearFilter] = useState<string>(''); // '' means All (search results)
+  const titleMatchedJournals = useMemo(() => {
+    if (!pageName.trim()) return [] as Box[];
+    const list = journalBoxesDedupe.filter(b => hasNonTrivialSummary(b) && titleMatchesQuery(b, pageName));
+    return list.sort((a,b)=> journalDateValue(b.name) - journalDateValue(a.name) || (b.time - a.time));
+  }, [journalBoxesDedupe, pageName, hasNonTrivialSummary, titleMatchesQuery]);
+  const candidateJournalsForResults = bodyTerms.length > 0 ? matchedJournals : titleMatchedJournals;
+  const journalYears = useMemo(() => {
+    const years = new Set<string>();
+    for (const b of candidateJournalsForResults.filter(x => hasNonTrivialSummary(x))) {
+      const decoded = b.name.replace(/%2F/gi,'/').replace(/^journals\//,'').replace(/\.(md|org)$/i,'');
+      const m = decoded.match(/^(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
+      if (m) years.add(m[1]);
+    }
+    return Array.from(years).sort((a,b)=> b.localeCompare(a));
+  }, [candidateJournalsForResults, hasNonTrivialSummary]);
+  const filteredJournalsForResults = useMemo(() => {
+    if (!journalYearFilter) return candidateJournalsForResults;
+    return candidateJournalsForResults.filter(b => {
+      const decoded = b.name.replace(/%2F/gi,'/').replace(/^journals\//,'').replace(/\.(md|org)$/i,'');
+      const m = decoded.match(/^(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
+      return !!m && m[1] === journalYearFilter;
+    });
+  }, [candidateJournalsForResults, journalYearFilter]);
+
+  // 検索結果の Journals を年月でグルーピング
+  const groupedSearchJournals = useMemo(() => groupJournalsByMonth(filteredJournalsForResults), [filteredJournalsForResults, groupJournalsByMonth]);
+
+  const searchActive = (pageName.trim().length > 0) || (bodyTerms.length > 0);
+
+  // 検索結果セクションの有無を判定（Pages/Journals）
+  const pagesResults = useMemo(() => {
+    if (!searchActive) return [] as Box[];
+    return (bodyTerms.length > 0 ? matchedMain : visibleMainBoxes);
+  }, [searchActive, bodyTerms.length, matchedMain, visibleMainBoxes]);
+  const hasPagesResults = pagesResults.length > 0;
+  const hasJournalResults = filteredJournalsForResults.length > 0;
+
+  // Main Pages view mode: 'cards' | 'list'
+  const [mainView, setMainView] = useState<'cards'|'list'>(() => (getString('mainViewMode','cards') as any) || 'cards');
+  useEffect(()=>{ setString('mainViewMode', mainView); },[mainView]);
+
+  // Non-search Pages section: reuse the same layout as search Pages
+
+  // EMPTY 折りたたみセクション（左ペイン、Favorites 直下）
+  const LeftEmptySection: React.FC<{
+    title: string;
+    items: Box[];
+    currentGraph: string;
+    preferredDateFormat: string;
+    onClick: (box: Box, e: React.MouseEvent<HTMLDivElement>) => void;
+    displayNameFor: (b: Box) => string | undefined;
+  }> = ({ title, items, currentGraph, preferredDateFormat, onClick, displayNameFor }) => {
+    const [collapsed, setCollapsed] = useState<boolean>(() => {
+      const v = getString('collapseEmpty', '');
+      return v === '' ? true : v === 'true';
+    });
+    useEffect(() => { setBoolean('collapseEmpty', collapsed); }, [collapsed]);
+    return (
+      <div className={'left-empty' + (collapsed ? ' collapsed' : '')}>
+        <div className='empty-header'>
+          <div className='empty-title'>{title}</div>
+          <button style={{ fontSize:11, padding:'2px 6px' }} onClick={() => setCollapsed(c => !c)}>{collapsed ? 'Expand' : 'Collapse'}</button>
+        </div>
+        {!collapsed && (
+          <CardList
+            items={items}
+            currentGraph={currentGraph}
+            preferredDateFormat={preferredDateFormat}
+            onClick={onClick}
+            displayNameFor={displayNameFor}
+            keyPrefix='left-empty'
+            gridClassName='journals-grid'
+          />
+        )}
+      </div>
+    );
+  };
 
   // Keyboard navigation over the tile grid
   useKeyboardNavigation({
@@ -966,7 +1284,7 @@ function App() {
     <>
       {/* 初回フォルダ選択ダイアログ */}
       <Dialog open={!modeChosen} onClose={()=>{}} maxWidth='xs' fullWidth>
-        <DialogTitle>{t('mode-choose-folder-desc') || 'Select a pages folder'}</DialogTitle>
+        <DialogTitle>{t('mode-choose-folder-title') || 'Choose a graph folder'}</DialogTitle>
         <DialogContent dividers>
           <div style={{display:'flex',flexDirection:'column',gap:12}}>
             <div>{t('mode-choose-folder-desc') || 'Choose your Logseq graph root (or pages folder).'}</div>
@@ -984,15 +1302,45 @@ function App() {
         </div>
       )}
       {modeChosen && (
-      <div className='control'>
+  <div className='control'>
         <div className='control-left'>
           <div className='loading' style={{ display: loading ? 'block' : 'none' }}>{t('loading')}</div>
           <div className='card-number'>Cards: {nonJournalCount}{journalBoxes.length > 0 ? ` (Journals: ${journalCount})` : ''}</div>
-          <TextField id='page-input' size='small' label={t('filter-by-page-name')} variant='filled' style={{ marginLeft: 12, marginTop: 1, float: 'left' }} value={pageName} onChange={e => setPageName(e.target.value)} InputProps={{ endAdornment: (<InputAdornment position='end'><IconButton onClick={() => setPageName('')} edge='end'><Clear /></IconButton></InputAdornment>), inputProps: { tabIndex: 1 } }} />
+          <TextField
+            id='search-q'
+            size='small'
+            label={t('search') || 'Search'}
+            variant='filled'
+            style={{ marginLeft: 12, marginTop: 1, float: 'left', minWidth: 260 }}
+            className={'search-box' + (bodyQuery.trim() ? ' marked' : '')}
+            value={bodyQuery}
+            onChange={e => { const v = e.target.value; setBodyQuery(v); setPageName(v); }}
+            helperText={undefined}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position='end'>
+                  <IconButton onClick={() => { setBodyQuery(''); setPageName(''); }} edge='end' title='Clear'>
+                    <Clear />
+                  </IconButton>
+                </InputAdornment>
+              ),
+              inputProps: { tabIndex: 1 }
+            }}
+          />
+          {bodySearchRunning && <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.7 }}>Searching…</span>}
           {/* Advanced 検索ボックス廃止 */}
         </div>
         <div className='control-right'>
-          <Tooltip title='Plugin Settings'>
+      <Tooltip title={t('mode-choose-folder-title') as string}>
+            <span>
+              <Button size='small' variant='outlined' disabled={cardsUpdating}
+                onClick={async ()=>{ await chooseFolderMode(); }}
+                style={{ marginRight: 6 }}>
+        {t('mode-choose-folder-btn')}
+              </Button>
+            </span>
+          </Tooltip>
+      <Tooltip title={t('settings') as string}>
             <IconButton size='small' onClick={()=> setGlobalSettingsOpen(true)} aria-label='open-plugin-settings'>
               <SettingsIcon fontSize='small' />
             </IconButton>
@@ -1000,7 +1348,7 @@ function App() {
           <div className='graph-info'>
             <span className='g-label'>{t('graph-label')}:</span>
             <span className='g-section plugin'>P:<span className='g-name'>{currentGraph || '-'}</span></span>
-            <span className='g-mode-badge' style={{ background: '#2d6', color: '#fff', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600 }} title='Folder Mode'>FOLDER</span>
+            <span className='g-mode-badge' style={{ background: '#2d6', color: '#fff', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600 }} title={t('mode-choose-folder-btn') as string}>FOLDER</span>
           </div>
           {/* Exclude journals トグルは廃止 */}
           <Clear className='clear-btn' onClick={() => logseq.hideMainUI({ restoreEditingCursor: true })} style={{ cursor: 'pointer', float: 'right', marginTop: 10, marginRight: 24 }} />
@@ -1026,7 +1374,7 @@ function App() {
   <div className='content'>
         <Dialog open={globalSettingsOpen} onClose={()=> setGlobalSettingsOpen(false)} maxWidth='sm' fullWidth>
           <DialogTitle style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
-            <span>Plugin Settings</span>
+            <span>{t('settings')}</span>
             <Button size='small' variant='outlined' onClick={resetUiFont}>Reset</Button>
           </DialogTitle>
           <DialogContent dividers>
@@ -1036,7 +1384,7 @@ function App() {
               <TextField size='small' type='number' label='Font Size' value={uiFontSize} onChange={e=>{const v=parseInt(e.target.value,10); if(!isNaN(v)&&v>=8&&v<=40) setUiFontSize(v);}} style={{width:120}} />
               <TextField size='small' type='number' label='Line Height' value={uiLineHeight} onChange={e=>{const v=parseFloat(e.target.value); if(!isNaN(v)&&v>=1&&v<=3) setUiLineHeight(v);}} style={{width:140}} />
               <TextField size='small' type='number' label='Font Weight' value={uiFontWeight} onChange={e=>{const v=parseInt(e.target.value,10); if(!isNaN(v)&&v>=300&&v<=900) setUiFontWeight(v);}} style={{width:150}} />
-              <TextField size='small' label='Google Font Family' value={uiFontFamily} onChange={e=> setUiFontFamily(e.target.value)} helperText='例: Inter / Roboto / Noto Sans JP' style={{flex:'1 1 240px'}} />
+              <TextField size='small' label='Google Font Family' value={uiFontFamily} onChange={e=> setUiFontFamily(e.target.value)} helperText='e.g. Inter / Roboto / Noto Sans JP' style={{flex:'1 1 240px'}} />
             </div>
             <div style={{marginTop:12}}>
               <div style={{fontSize:12,opacity:.75,marginBottom:4}}>Quick Pick</div>
@@ -1057,7 +1405,86 @@ function App() {
           </DialogActions>
         </Dialog>
         <div className='left-pane'>
-          <div id='tile' ref={tileRef} tabIndex={2}>{boxElements}</div>
+          {!searchActive && (
+            <div className='left-search left-search-pages' ref={tileRef} tabIndex={2}>
+                  <PagesSection
+                title={t('pages')}
+                items={visibleMainBoxes}
+                mode={mainView}
+                onChangeMode={setMainView}
+                currentGraph={currentGraph}
+                preferredDateFormat={preferredDateFormat}
+                onClickCard={boxOnClick}
+                displayTitle={(n)=>displayTitle(n)}
+                keyPrefix='main'
+                highlightTitleTerms={nameTerms}
+                isSelected={(_, idx)=> selectedBox === idx}
+                onOpenPageByName={(name)=>{ void openPageInPreviewByName(name); }}
+                  pagesDirHandle={currentDirHandle}
+                  journalsDirHandle={journalsDirHandle}
+              />
+            </div>
+          )}
+          {searchActive && (
+            <div className={'search-wrapper'}>
+              {hasPagesResults && (
+                <div className='left-search'>
+                    <PagesSection
+                    title={t('pages')}
+                    items={pagesResults}
+                    mode={mainView}
+                    onChangeMode={setMainView}
+                    currentGraph={currentGraph}
+                    preferredDateFormat={preferredDateFormat}
+                    onClickCard={boxOnClick}
+                    displayTitle={(n)=>displayTitle(n)}
+                    keyPrefix='main-search'
+                    isSelected={(_, idx)=> selectedBox === idx}
+                    highlightTitleTerms={[...new Set([...(nameTerms||[]), ...(bodyTerms||[])])]} 
+                    bodyHighlightTerms={bodyTerms}
+                    getSnippet={getSnippetFullText}
+                    onOpenPageByName={(name)=>{ void openPageInPreviewByName(name); }}
+                    pagesDirHandle={currentDirHandle}
+                    journalsDirHandle={journalsDirHandle}
+                  />
+                </div>
+              )}
+              {hasJournalResults && (
+                <div className='left-search left-search-journals'>
+                  <div className='search-header'>
+                    <div className='search-title'>{t('journals')}</div>
+                    {journalYears.length > 0 && (
+                      <select value={journalYearFilter} onChange={e=> setJournalYearFilter(e.target.value)} aria-label={t('journals') as string} className='year-filter'>
+                        <option value=''>{t('search')}</option>
+                        {journalYears.map(y => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                    )}
+                  </div>
+                  {groupedSearchJournals.length === 0 ? (
+                    <div className='sidebar-empty'>{t('no-content')}</div>
+                  ) : groupedSearchJournals.map(g => (
+                    <div key={`sj-${g.key}`} style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize:11, fontWeight:600, letterSpacing:0.5, margin:'6px 0 4px', borderBottom:'1px solid #ddd', paddingBottom:2 }}>{g.label}</div>
+                      <CardList
+                        items={g.items}
+                        currentGraph={currentGraph}
+                        preferredDateFormat={preferredDateFormat}
+                        onClick={boxOnClick}
+                        displayNameFor={(b)=>journalDayWeek(b.name)}
+                        keyPrefix='journal-search'
+                        gridClassName='journals-grid'
+                        isSelected={(_)=> false}
+                        highlightTitleTerms={[...new Set([...(nameTerms||[]), ...(bodyTerms||[])])]} 
+                        bodyHighlightTerms={bodyTerms}
+                        getSnippet={getSnippetFullText}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {!searchActive && (
           <div className='left-favorites'>
             <div className='favorites-header'><div className='favorites-title'>{t('favorites') || 'Favorites'}</div></div>
             {leftFavorites.length === 0 ? (
@@ -1070,17 +1497,38 @@ function App() {
                 onClick={boxOnClick}
                 displayNameFor={(b) => displayTitle(b.name)}
                 keyPrefix='left-fav'
+                onToggleFavorite={toggleFavorite}
               />
             )}
           </div>
-          {(journalBoxes.length > 0) && (
+          )}
+          {/* EMPTY: Favorites の直下に折りたたみセクションとして配置 */}
+          {!searchActive && emptyBoxes.length > 0 && (
+            <LeftEmptySection
+              title={t('no-content') as string}
+              items={emptyBoxes}
+              currentGraph={currentGraph}
+              preferredDateFormat={preferredDateFormat}
+              onClick={boxOnClick}
+              displayNameFor={(b: Box) => isJournalName(b.name) ? journalDayWeek(b.name) : displayTitle(b.name)}
+            />
+          )}
+          {!searchActive && (journalBoxes.length > 0) && (
             <div className={'left-journals' + (collapseJournals ? ' collapsed' : '')} onScroll={e => {
               const el = e.currentTarget;
               if (el.scrollTop + el.clientHeight >= el.scrollHeight - 20) loadMoreJournals();
             }}>
               <div className='journals-header'>
-                <div className='journals-title'>JOURNALS</div>
-                <button style={{ fontSize:11, padding:'2px 6px' }} onClick={() => setCollapseJournals(c => !c)}>{collapseJournals ? 'Expand' : 'Collapse'}</button>
+                <div className='journals-title'>{t('journals')}</div>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  {journalsAllYears.length > 0 && (
+                    <select value={journalsYearFilter} onChange={e=> setJournalsYearFilter(e.target.value)} aria-label={t('journals') as string} className='year-filter'>
+                      <option value=''>{t('search')}</option>
+                      {journalsAllYears.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                  )}
+                  <button style={{ fontSize:11, padding:'2px 6px' }} onClick={() => setCollapseJournals(c => !c)}>{collapseJournals ? 'Expand' : 'Collapse'}</button>
+                </div>
               </div>
               {!collapseJournals && groupedJournals.map(g => (
                 <div key={g.key} style={{ marginBottom: 12 }}>
@@ -1099,20 +1547,6 @@ function App() {
               {!collapseJournals && journalLimit < journalBoxes.length && (
                 <div style={{ textAlign:'center', marginTop:8 }}>
                   <button style={{ fontSize:11, padding:'4px 10px' }} onClick={loadMoreJournals}>Load more ({journalLimit}/{journalBoxes.length})</button>
-                </div>
-              )}
-              {/* EMPTY: 本文が空のカード群（ジャーナル/非ジャーナル混在、常に一番下） */}
-              {emptyBoxes.length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <div className='journals-separator-label'>EMPTY</div>
-                  <CardList
-                    items={emptyBoxes}
-                    currentGraph={currentGraph}
-                    preferredDateFormat={preferredDateFormat}
-                    onClick={boxOnClick}
-                    displayNameFor={(b) => isJournalName(b.name) ? journalDayWeek(b.name) : displayTitle(b.name)}
-                    keyPrefix='empty'
-                  />
                 </div>
               )}
             </div>
@@ -1154,10 +1588,14 @@ function App() {
               setRemoveStringsRaw={setRemoveStringsRaw}
               alwaysHideKeys={alwaysHideKeys}
               removeStrings={removeStrings}
+              highlightTerms={bodyTerms}
 
               currentGraph={currentGraph}
               preferredDateFormat={preferredDateFormat}
               assetsDirHandle={assetsDirHandle}
+
+              hideLogbook={hideLogbook}
+              setHideLogbook={setHideLogbook}
 
               subpages={subpages}
               subpagesDeeper={subpagesDeeper}

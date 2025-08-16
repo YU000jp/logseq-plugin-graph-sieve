@@ -39,9 +39,11 @@ export async function rebuildDatabase(opts: RebuildOptions): Promise<void> {
     }
     if (!currentDirHandle) { return; }
     try {
-      // synthetic は丸ごと再構築
+      // synthetic は丸ごと再構築（まず Pages のみをロック下で処理）
       await boxService.removeByGraph(currentGraph);
+
       const existingSet = new Set<string>();
+
       const processFile = async (dir: FileSystemDirectoryHandle, entryName: string) => {
         try {
           if (rebuildTokenRef.current !== myToken) return; // 以降はキャンセル
@@ -60,14 +62,22 @@ export async function rebuildDatabase(opts: RebuildOptions): Promise<void> {
           existingSet.add(pageName);
         } catch { /* ignore */ }
       };
-      // root entries
+
+      // Pages: ルート直下のファイルのみ（journals ディレクトリはスキップ）
       // @ts-ignore
       for await (const [entryName, entry] of (currentDirHandle as any).entries()) {
-  if (rebuildTokenRef.current !== myToken) break;
+        if (rebuildTokenRef.current !== myToken) break;
         if (!entryName) continue;
         if (entry.kind === 'file') {
           await processFile(currentDirHandle, entryName);
-        } else if (entry.kind === 'directory' && entryName === 'journals') {
+        }
+        // ディレクトリはここでは無視（journals は後段で非同期処理）
+      }
+
+      // Journals: ロック外で別スレッド的に処理（ロックは解除してから起動）
+      const kickJournals = async () => {
+        try {
+          // currentDirHandle/journals サブディレクトリ
           const journalsDir = await currentDirHandle.getDirectoryHandle('journals').catch(() => null as any);
           if (journalsDir) {
             // @ts-ignore
@@ -77,19 +87,22 @@ export async function rebuildDatabase(opts: RebuildOptions): Promise<void> {
               await processFile(journalsDir, jName);
             }
           }
-        }
-      }
-      // sibling root-level journals dir (optional)
-      if (journalsDirHandle) {
-        try {
-          // @ts-ignore
-          for await (const [jName, jEntry] of (journalsDirHandle as any).entries()) {
-            if (rebuildTokenRef.current !== myToken) break;
-            if (!jName || jEntry.kind !== 'file') continue;
-            await processFile(journalsDirHandle, jName);
+          // 兄弟階層の journals ディレクトリ（オプション）
+          if (journalsDirHandle) {
+            try {
+              // @ts-ignore
+              for await (const [jName, jEntry] of (journalsDirHandle as any).entries()) {
+                if (rebuildTokenRef.current !== myToken) break;
+                if (!jName || jEntry.kind !== 'file') continue;
+                await processFile(journalsDirHandle, jName);
+              }
+            } catch { /* ignore */ }
           }
         } catch { /* ignore */ }
-      }
+      };
+
+      // ロック解除後に非同期でキック
+      queueMicrotask(() => { void kickJournals(); });
     } catch { /* ignore */ }
   } catch (e) {
     console.warn('rebuildDB failed', e);

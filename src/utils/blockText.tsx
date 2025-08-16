@@ -13,6 +13,7 @@ export interface BlockTextOptions {
   hideQueries?: boolean;
   firstLineOnly?: boolean;
   stripPageBrackets?: boolean;
+  stripLogbook?: boolean; // default true; when false, keep :LOGBOOK: sections
 }
 export type LineEmit = (args: { depth: number; core: string }) => void;
 
@@ -48,10 +49,43 @@ const stripMarkdown = (s: string): string => {
 
 // moved to utils/content.ts
 
+/**
+ * Remove structural LOGBOOK ranges from a BlockNode array.
+ * This removes any sibling sequence starting with a node whose content is ':LOGBOOK:'
+ * and continues removing nodes until a sibling with content ':END:' is encountered (inclusive).
+ * Runs recursively for children as well.
+ */
+export function stripLogbookNodes(nodes: BlockNode[] | undefined | null): BlockNode[] {
+  if (!nodes || nodes.length === 0) return [];
+  const result: BlockNode[] = [];
+  let skipping = false;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const content = (n.content || '').replace(/\r/g, '').trim();
+    if (!skipping && /^:LOGBOOK:\s*$/i.test(content)) {
+      skipping = true;
+      continue; // drop the :LOGBOOK: marker itself
+    }
+    if (skipping) {
+      // keep skipping until we see :END:
+      if (/^:END:\s*$/i.test(content)) {
+        skipping = false; // drop the :END: line and stop skipping
+      }
+      continue; // drop content in LOGBOOK section
+    }
+    const children = n.children && n.children.length ? stripLogbookNodes(n.children) : [];
+    // create a shallow copy to avoid mutating original structure
+    result.push({ content: n.content, children });
+  }
+  return result;
+}
+
 export function walkBlocks(blocks: BlockNode[], opts: BlockTextOptions, depth: number, emit: LineEmit) {
-  const { hideProperties, hideReferences, alwaysHideKeys, folderMode, removeStrings, hideQueries, firstLineOnly } = opts;
-  for (const b of blocks) {
-    let raw = stripLogbook(b.content ?? '');
+  const { hideProperties, hideReferences, alwaysHideKeys, folderMode, removeStrings, hideQueries, firstLineOnly, stripLogbook: stripLog = true } = opts;
+  const levelBlocks = stripLog ? stripLogbookNodes(blocks) : blocks;
+  for (const b of levelBlocks) {
+    let raw = b.content ?? '';
+    if (stripLog !== false) raw = stripLogbook(raw);
     if (removeStrings && removeStrings.length) for (const rs of removeStrings) if (rs) raw = raw.split(rs).join('');
     const rawLines = raw.split('\n');
     const iterate = firstLineOnly ? rawLines.slice(0,1) : rawLines;
@@ -77,22 +111,22 @@ export function walkBlocks(blocks: BlockNode[], opts: BlockTextOptions, depth: n
       if (folderMode && RE.loneDash.test(coreLine)) continue;
       emit({ depth, core: coreLine });
     }
-    if (b.children && b.children.length) walkBlocks(b.children as BlockNode[], opts, depth + 1, emit);
+  if (b.children && b.children.length) walkBlocks(b.children as BlockNode[], opts, depth + 1, emit);
   }
 }
 
-export function flattenBlocksToText(blocks: BlockNode[], hideProperties: boolean, hideReferences: boolean, depth = 0, alwaysHideKeys: string[] = [], folderMode = false, removeStrings: string[] = []): string {
+export function flattenBlocksToText(blocks: BlockNode[], hideProperties: boolean, hideReferences: boolean, depth = 0, alwaysHideKeys: string[] = [], folderMode = false, removeStrings: string[] = [], stripLogbookFlag: boolean = true): string {
   const indent = (n: number) => '  '.repeat(n);
   const lines: string[] = [];
-  walkBlocks(blocks, { hideProperties, hideReferences, alwaysHideKeys, folderMode, removeStrings }, depth, ({ depth: d, core }) => {
+  walkBlocks(blocks, { hideProperties, hideReferences, alwaysHideKeys, folderMode, removeStrings, stripLogbook: stripLogbookFlag }, depth, ({ depth: d, core }) => {
     lines.push(`${indent(d)}- ${core}`);
   });
   return lines.join('\n');
 }
 
-export function blocksToPlainText(blocks: BlockNode[], hideProperties: boolean, hideReferences: boolean, depth = 0, alwaysHideKeys: string[] = [], folderMode: boolean = false, removeStrings: string[] = []): string {
+export function blocksToPlainText(blocks: BlockNode[], hideProperties: boolean, hideReferences: boolean, depth = 0, alwaysHideKeys: string[] = [], folderMode: boolean = false, removeStrings: string[] = [], stripLogbookFlag: boolean = true): string {
   const lines: string[] = [];
-  walkBlocks(blocks, { hideProperties, hideReferences, alwaysHideKeys, folderMode, removeStrings }, depth, ({ depth: d, core }) => {
+  walkBlocks(blocks, { hideProperties, hideReferences, alwaysHideKeys, folderMode, removeStrings, stripLogbook: stripLogbookFlag }, depth, ({ depth: d, core }) => {
     const onlyMdImg = /^(?:!\[[^\]]*\]\([^)]*\))$/.test(core.trim());
     const onlyOrgImg = /^\[\[[^\]]+\](?:\[[^\]]*\])?\]$/.test(core.trim());
     if (onlyMdImg || onlyOrgImg) return;
@@ -123,9 +157,10 @@ export function outlineTextFromBlocks(blocks: BlockNode[], opts: { hidePropertie
   return lines.join('\n');
 }
 
-export const RawCustomView: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; stripPageBrackets?: boolean; hideQueries?: boolean; removeStrings?: string[]; folderMode?: boolean; normalizeTasks?: boolean }> = ({ blocks, hideProperties = false, hideReferences = false, alwaysHideKeys = [], stripPageBrackets = false, hideQueries = false, removeStrings = [], folderMode = false, normalizeTasks = false }) => {
+export const RawCustomView: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; stripPageBrackets?: boolean; hideQueries?: boolean; removeStrings?: string[]; folderMode?: boolean; normalizeTasks?: boolean; hideLogbook?: boolean }> = ({ blocks, hideProperties = false, hideReferences = false, alwaysHideKeys = [], stripPageBrackets = false, hideQueries = false, removeStrings = [], folderMode = false, normalizeTasks = false, hideLogbook = true }) => {
   const normalizeTaskLinesLocal = (text: string, enable: boolean) => normalizeTaskLinesUtil(text, enable);
-  let text = flattenBlocksToText(blocks, hideProperties, hideReferences, 0, alwaysHideKeys, folderMode, removeStrings);
+  // RAW: 生テキスト表示（LOGBOOK はトグルに従う）
+  let text = flattenBlocksToText(blocks, hideProperties, hideReferences, 0, alwaysHideKeys, folderMode, removeStrings, !!hideLogbook);
   if (stripPageBrackets) {
     text = text.replace(/\[\[([^\]]+)\]\]/g,'$1')
       .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
@@ -141,8 +176,8 @@ export const RawCustomView: React.FC<{ blocks: BlockNode[]; hideProperties?: boo
   return <pre className='ls-plain-text'>{text}</pre>;
 };
 
-export const PlainTextView: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; folderMode?: boolean; stripPageBrackets?: boolean; hideQueries?: boolean; removeStrings?: string[] }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], folderMode, stripPageBrackets, hideQueries, removeStrings = [] }) => {
-  let text = blocksToPlainText(blocks, !!hideProperties, !!hideReferences, 0, alwaysHideKeys, !!folderMode, removeStrings);
+export const PlainTextView: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; folderMode?: boolean; stripPageBrackets?: boolean; hideQueries?: boolean; removeStrings?: string[]; hideLogbook?: boolean }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], folderMode, stripPageBrackets, hideQueries, removeStrings = [], hideLogbook = true }) => {
+  let text = blocksToPlainText(blocks, !!hideProperties, !!hideReferences, 0, alwaysHideKeys, !!folderMode, removeStrings, !!hideLogbook);
   if (hideQueries) text = text.split('\n').filter(l => !/\{\{\s*query\b/i.test(l)).join('\n');
   if (stripPageBrackets) text = text.replace(/\[\[([^\]]+)\]\]/g,'$1');
   if (removeStrings && removeStrings.length) for (const rs of removeStrings) if (rs) text = text.split(rs).join('');

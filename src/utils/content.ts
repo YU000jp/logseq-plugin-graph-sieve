@@ -17,14 +17,18 @@ export function isForcedHiddenPropLine(line: string, alwaysHideKeys: string[] = 
   return alwaysHideKeys.map((s) => s.toLowerCase()).includes(k);
 }
 
-/** Remove :LOGBOOK: ... :END: sections */
+/** Remove :LOGBOOK: ... :END: sections (tolerates bullets/checkbox prefixes) */
 export function stripLogbook(s: string): string {
   const lines = (s || '').split('\n');
   const out: string[] = [];
   let skip = false;
+  // Accept optional bullet/numbered list and optional checkbox before markers
+  const prefix = String.raw`(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?`;
+  const begin = new RegExp(`^${prefix}\s*:LOGBOOK:\s*$`, 'i');
+  const end = new RegExp(`^${prefix}\s*:END:\s*$`, 'i');
   for (const line of lines) {
-    if (!skip && /^\s*:LOGBOOK:\s*$/i.test(line)) { skip = true; continue; }
-    if (skip) { if (/^\s*:END:\s*$/i.test(line)) skip = false; continue; }
+    if (!skip && begin.test(line)) { skip = true; continue; }
+    if (skip) { if (end.test(line)) skip = false; continue; }
     out.push(line);
   }
   return out.join('\n');

@@ -11,6 +11,8 @@ import { ContentCopy } from '@mui/icons-material';
 import type { Box } from '../db';
 import CardList from './CardList';
 import { BlockList, hasRenderableContent } from './BlockList';
+import HierarchyList from './HierarchyList';
+import ViewModeToggle from './ViewModeToggle';
 import { PlainTextView, RawCustomView, blocksToPlainText, outlineTextFromBlocks, flattenBlocksToText, type BlockNode } from '../utils/blockText';
 import { normalizeTaskLines as normalizeTaskLinesUtil, removeMacroTokens as removeMacroTokensUtil } from '../utils/text';
 import { setString } from '../utils/storage';
@@ -45,6 +47,8 @@ export interface PreviewPaneProps {
   setHideRenderers: (v: boolean) => void;
   removeMacros: boolean;
   setRemoveMacros: (v: boolean) => void;
+  hideLogbook: boolean;
+  setHideLogbook: (v: boolean) => void;
   normalizeTasks: boolean;
   setNormalizeTasks: (v: boolean) => void;
   alwaysHidePropKeys: string;
@@ -53,6 +57,8 @@ export interface PreviewPaneProps {
   setRemoveStringsRaw: (v: string) => void;
   alwaysHideKeys: string[];
   removeStrings: string[];
+  // ハイライト対象キーワード
+  highlightTerms?: string[];
 
   // Context
   currentGraph: string;
@@ -95,16 +101,19 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
   hideRenderers,
     setHideQueries,
   setHideRenderers,
-    removeMacros,
-    setRemoveMacros,
+  removeMacros,
+  setRemoveMacros,
+  hideLogbook,
+  setHideLogbook,
     normalizeTasks,
     setNormalizeTasks,
     alwaysHidePropKeys,
     setAlwaysHidePropKeys,
     removeStringsRaw,
     setRemoveStringsRaw,
-    alwaysHideKeys,
+  alwaysHideKeys,
     removeStrings,
+  highlightTerms,
     currentGraph,
     preferredDateFormat,
   assetsDirHandle,
@@ -120,6 +129,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
   const normalizeTaskLines = (text: string, enable: boolean) => normalizeTaskLinesUtil(text, enable);
   const removeMacroTokens = (text: string, enable: boolean, alsoQueries: boolean) => removeMacroTokensUtil(text, enable, alsoQueries);
   const [copyHover, setCopyHover] = useState(false);
+  const [settingsHover, setSettingsHover] = useState(false);
 
   // Breadcrumb builder
   const breadcrumb = useMemo(() => {
@@ -166,6 +176,12 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
 
   const isJournalPreview = isJournalName(sidebarBox.name);
 
+  // View toggles for Subpages/Related: 'cards' | 'list'
+  const [subView, setSubView] = useState<'cards'|'list'>('cards');
+  const [relView, setRelView] = useState<'cards'|'list'>('cards');
+
+  // Use shared HierarchyList for consistent list style (dim shared prefix, truncate tail)
+
   return (
     <div className={'sidebar-inner' + (sidebarBox.archived ? ' archived' : '')}>
       <div className='sidebar-header'>
@@ -177,63 +193,102 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
         <div className='sidebar-title' title={displayTitle(sidebarBox.name)}>{breadcrumb}</div>
         <div className='sidebar-controls'>
           <Tooltip title={sidebarBox.favorite ? (t('unfavorite') || 'Unfavorite') : (t('favorite') || 'Favorite')}><IconButton size='small' onClick={() => toggleFavorite(sidebarBox, !sidebarBox.favorite)} aria-label='favorite-toggle'>{sidebarBox.favorite ? <StarIcon fontSize='small' style={{ color: '#f5b301' }} /> : <StarBorderIcon fontSize='small' />}</IconButton></Tooltip>
-          <Tooltip title={sidebarBox.archived ? 'Unarchive' : 'Archive'}><IconButton size='small' onClick={() => toggleArchive(sidebarBox, !sidebarBox.archived)} aria-label='archive-toggle'>{sidebarBox.archived ? <Inventory2Icon fontSize='small' /> : <Inventory2OutlinedIcon fontSize='small' />}</IconButton></Tooltip>
+          <Tooltip title={sidebarBox.archived ? (t('unarchive') || 'Unarchive') : (t('archive') || 'Archive')}><IconButton size='small' onClick={() => toggleArchive(sidebarBox, !sidebarBox.archived)} aria-label='archive-toggle'>{sidebarBox.archived ? <Inventory2Icon fontSize='small' /> : <Inventory2OutlinedIcon fontSize='small' />}</IconButton></Tooltip>
         </div>
       </div>
-      <div className='sidebar-nav'>
+      <div className={'sidebar-nav' + (settingsHover ? ' settings-hover' : '')}>
         <div className='sidebar-row sidebar-row--tabs'>
           <div className='sidebar-tabs'>
             <Button size='small' variant={sidebarTab === 'content' ? 'contained' : 'text'} onClick={() => onSetTab('content')}>{t('tab-content')}</Button>
             <Button size='small' variant={sidebarTab === 'nomark' ? 'contained' : 'text'} onClick={() => onSetTab('nomark')}>{t('tab-no-markdown')}</Button>
             <Button size='small' variant={sidebarTab === 'outline' ? 'contained' : 'text'} onClick={() => onSetTab('outline')}>{t('tab-raw')}</Button>
             <span className='tabs-spacer' />
-            <Tooltip title={(t('settings') as string) || 'Settings'}><IconButton size='small' onClick={() => onToggleSettings()} aria-label='toggle-settings'><SettingsIcon fontSize='small' color={showSidebarSettings ? 'primary' : 'inherit'} /></IconButton></Tooltip>
+            <Tooltip title={(t('settings') as string) || 'Settings'}>
+              <IconButton
+                size='small'
+                onClick={() => onToggleSettings()}
+                onMouseEnter={() => setSettingsHover(true)}
+                onMouseLeave={() => setSettingsHover(false)}
+                onFocus={() => setSettingsHover(true)}
+                onBlur={() => setSettingsHover(false)}
+                aria-label='toggle-settings'
+              >
+                <SettingsIcon fontSize='small' color={showSidebarSettings ? 'primary' : 'inherit'} />
+              </IconButton>
+            </Tooltip>
           </div>
         </div>
-  {showSidebarSettings && <div className='sidebar-row sidebar-row--filters small-text'>
+  {showSidebarSettings && <div className='settings-highlight'>
+        <div className='sidebar-row sidebar-row--filters small-text'>
           <FormControlLabel className='prop-filter' disabled={false} control={<Switch size='small' checked={hideProperties} onChange={(_, v) => setHideProperties(v)} />} label={t('toggle-hide-properties')} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={stripPageBrackets} onChange={(_, v) => setStripPageBrackets(v)} />} label={t('toggle-strip-page-brackets') || 'Strip [[ ]]'} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={!hidePageRefs} onChange={(_, v) => setHidePageRefs(!v)} />} label={t('toggle-page-links') || t('toggle-hide-page-refs') || 'Page links'} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={hideQueries} onChange={(_, v) => setHideQueries(v)} />} label={t('toggle-hide-queries') || 'Hide queries'} />
+        </div>
+        <div className='sidebar-row sidebar-row--filters small-text'>
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={hideRenderers} onChange={(_, v) => setHideRenderers(v)} />} label={t('toggle-hide-renderers') || 'Hide renderers'} />
           <Tooltip title={t('toggle-remove-macros-help') || 'Remove {{macro ...}} constructs (except queries unless hidden)'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={removeMacros} onChange={(_, v) => setRemoveMacros(v)} />} label={t('toggle-remove-macros') || 'Remove macros'} /></span></Tooltip>
+          <Tooltip title={t('toggle-hide-logbook-help') || 'Hide :LOGBOOK: ... :END: sections'}><span><FormControlLabel className='prop-filter' disabled={false} control={<Switch size='small' checked={hideLogbook} onChange={(_, v) => setHideLogbook(v)} />} label={t('toggle-hide-logbook') || 'Hide LOGBOOK'} /></span></Tooltip>
           <Tooltip title={t('toggle-normalize-tasks-help') || 'Convert TODO/DONE etc. to Markdown checkboxes'}><span><FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={normalizeTasks} onChange={(_, v) => setNormalizeTasks(v)} />} label={t('toggle-normalize-tasks') || 'Normalize tasks'} /></span></Tooltip>
-        </div>}
-  {showSidebarSettings && <div className='sidebar-row sidebar-row--options small-text'>
+        </div>
+        <div className='sidebar-row sidebar-row--options small-text'>
           <TextField size='small' label={t('always-hide-props')} placeholder={t('always-hide-props-ph')} value={alwaysHidePropKeys} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { const v = e.target.value; setAlwaysHidePropKeys(v); setString('alwaysHideProps', v); }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px' }} />
           <TextField size='small' label={t('remove-strings')} placeholder={t('remove-strings-ph')} value={removeStringsRaw} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { setRemoveStringsRaw(e.target.value); }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px', marginLeft: '8px' }} />
-        </div>}
+        </div>
+      </div>}
         <div className='sidebar-row sidebar-row--actions'>
           <div className='sidebar-actions' style={{ marginLeft: 'auto', justifyContent: 'flex-end' }}>
             {(() => { const canCopy = !((sidebarTab !== 'content' && sidebarTab !== 'nomark' && sidebarTab !== 'outline' && sidebarTab !== 'raw-custom') || sidebarLoading || !(sidebarBlocks && sidebarBlocks.length > 0)); return (
             <Button size='small' variant='outlined' startIcon={<ContentCopy fontSize='small' />} disabled={!canCopy} onMouseEnter={() => { if (canCopy) setCopyHover(true); }} onMouseLeave={() => setCopyHover(false)} onFocus={() => { if (canCopy) setCopyHover(true); }} onBlur={() => setCopyHover(false)} onClick={async () => {
               if (!sidebarBlocks) return;
-              let text: string;
-              if (sidebarTab === 'nomark') {
-                text = blocksToPlainText(sidebarBlocks as BlockNode[], hideProperties, true, 0, alwaysHideKeys, folderMode, removeStrings);
-              } else if (sidebarTab === 'outline') {
-                text = outlineTextFromBlocks((sidebarBlocks || []) as BlockNode[], { hideProperties, hideReferences: true, alwaysHideKeys, hideQueries, removeStrings, stripPageBrackets });
-              } else {
-                text = flattenBlocksToText(sidebarBlocks as BlockNode[], hideProperties, true, 0, alwaysHideKeys, folderMode, removeStrings);
-              }
-              if (hideRenderers) text = text.replace(/\{\{\s*renderer\b[^}]*\}\}/ig, '');
-              if (sidebarTab !== 'outline') {
-                text = text.split('\n').filter(l => l.trim().length > 0).join('\n');
-                if (stripPageBrackets) {
-                  text = text.replace(/\[\[([^\]]+)\]\]/g, '$1')
-                    .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
-                    .replace(/\[\[([^\]]+)\]\[([^\]]*)\]\]/g, (_, u, txt) => txt || u);
-                }
-                if (hideQueries) text = text.replace(/\{\{\s*query[^}]*\}\}/ig, '');
-                if (removeMacros) text = removeMacroTokens(text, true, hideQueries);
-                if (removeStrings.length) { for (const rs of removeStrings) if (rs) text = text.split(rs).join(''); }
-                if (normalizeTasks) text = normalizeTaskLines(text, true);
-                text = text.replace(/\n{2,}/g, '\n').replace(/ +/g, ' ').trim();
-              } else {
-                if (normalizeTasks) text = normalizeTaskLines(text, true);
-                text = text.replace(/\n{2,}/g, '\n').replace(/ +/g, ' ').trim();
-              }
+              // 1) 選択テキストがプレビュー本文内にあれば、それを優先してコピー
+              let text: string | undefined;
               try {
+                const sel = (window.getSelection && window.getSelection()) || (document.getSelection && document.getSelection && document.getSelection());
+                if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+                  const range = sel.getRangeAt(0);
+                  const sidebarEl = document.querySelector('.sidebar-main-text');
+                  if (sidebarEl && range && sidebarEl.contains(range.commonAncestorContainer)) {
+                    const selected = sel.toString();
+                    if (selected && selected.trim().length > 0) {
+                      text = selected.trim();
+                    }
+                  }
+                }
+              } catch { /* noop */ }
+
+              // 2) 選択がなければビューに応じて整形した本文をコピー
+              if (!text) {
+                if (sidebarTab === 'nomark') {
+                  text = blocksToPlainText(sidebarBlocks as BlockNode[], hideProperties, true, 0, alwaysHideKeys, folderMode, removeStrings);
+                } else if (sidebarTab === 'outline') {
+                  text = outlineTextFromBlocks((sidebarBlocks || []) as BlockNode[], { hideProperties, hideReferences: true, alwaysHideKeys, hideQueries, removeStrings, stripPageBrackets });
+                } else {
+                  text = flattenBlocksToText(sidebarBlocks as BlockNode[], hideProperties, true, 0, alwaysHideKeys, folderMode, removeStrings);
+                }
+                if (hideRenderers) text = text.replace(/\{\{\s*renderer\b[^}]*\}\}/ig, '');
+                if (sidebarTab !== 'outline') {
+                  // Strip inline embeds in CONTENT/PLAIN text copy
+                  text = text.replace(/\{\{\s*embed[^}]*\}\}/ig, '');
+                  text = text.split('\n').filter(l => l.trim().length > 0).join('\n');
+                  if (stripPageBrackets) {
+                    text = text.replace(/\[\[([^\]]+)\]\]/g, '$1')
+                      .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+                      .replace(/\[\[([^\]]+)\]\[([^\]]*)\]\]/g, (_, u, txt) => txt || u);
+                  }
+                  if (hideQueries) text = text.replace(/\{\{\s*query[^}]*\}\}/ig, '');
+                  if (removeMacros) text = removeMacroTokens(text, true, hideQueries);
+                  if (removeStrings.length) { for (const rs of removeStrings) if (rs) text = text.split(rs).join(''); }
+                  if (normalizeTasks) text = normalizeTaskLines(text, true);
+                  text = text.replace(/\n{2,}/g, '\n').replace(/ +/g, ' ').trim();
+                } else {
+                  if (normalizeTasks) text = normalizeTaskLines(text, true);
+                  text = text.replace(/\n{2,}/g, '\n').replace(/ +/g, ' ').trim();
+                }
+              }
+
+              try {
+                if (text == null) return;
                 if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
                 else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
                 const lg = (window as any).logseq;
@@ -273,46 +328,73 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
                   {sidebarLoading ? <div className='sidebar-loading'>{t('loading-content')}</div> : sidebarTab === 'content' ? (() => {
                     const has = hasRenderableContent((sidebarBlocks || []) as BlockNode[], hideProperties, true, alwaysHideKeys, hidePageRefs, hideQueries, removeStrings, hideRenderers);
                     if (has) {
-                      return <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} hideRenderers={hideRenderers} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} />;
+                      return <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} hideRenderers={hideRenderers} hideEmbeds={true} hideLogbook={hideLogbook} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} highlightTerms={highlightTerms} />;
                     }
                     // ジャーナルは refs/queries のみで構成されることがあるためフォールバックで本文表示
                     if (isJournalPreview) {
-                      return <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={false} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={false} removeStrings={removeStrings} />;
+                      return <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={false} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={false} removeStrings={removeStrings} hideLogbook={hideLogbook} />;
                     }
                     // 空配列/nullの時は空表示
                     if (!sidebarBlocks || (Array.isArray(sidebarBlocks) && sidebarBlocks.length === 0)) {
                       return <div className='sidebar-empty'>{t('no-content')}</div>;
                     }
-                    return <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} />;
-                  })() : sidebarTab === 'nomark' ? <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} /> : sidebarTab === 'outline' ? <RawCustomView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} folderMode={folderMode} normalizeTasks={normalizeTasks} /> : null}
+                    return <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} hideLogbook={hideLogbook} />;
+                  })() : sidebarTab === 'nomark' ? <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} /> : sidebarTab === 'outline' ? <RawCustomView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} folderMode={folderMode} normalizeTasks={normalizeTasks} hideLogbook={hideLogbook} /> : null}
                 </div>
               </div>
         {subpagesPresent && <div className='sidebar-pane sidebar-pane-subpages' style={{ flex: subFlex }} onMouseEnter={() => setHoveredSidePane('sub')} onMouseLeave={() => setHoveredSidePane(p => p === 'sub' ? null : p)}>
                 <div className='sidebar-subpages'>
-                  <div className='subpages-title'>{t('subpages')}</div>
+                  <div className='subpages-title' style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                    <span>{t('subpages')}</span>
+                    <ViewModeToggle value={subView} onChange={setSubView} />
+                  </div>
           {subpagesDeeper && <div className='subpages-notice'>{t('subpages-deeper-notice')}</div>}
-          <CardList
-            items={subpages}
-            currentGraph={currentGraph}
-            preferredDateFormat={preferredDateFormat}
-            onClick={boxOnClick}
-            displayNameFor={(b) => displayTitle(b.name)}
-            keyPrefix='sub'
-          />
+          {subView === 'cards' ? (
+            <CardList
+              items={subpages}
+              currentGraph={currentGraph}
+              preferredDateFormat={preferredDateFormat}
+              onClick={boxOnClick}
+              displayNameFor={(b) => displayTitle(b.name)}
+              keyPrefix='sub'
+            />
+          ) : (
+            <div className='subpages-list'>
+              <HierarchyList
+                items={subpages}
+                displayTitle={(n)=> displayTitle(n)}
+                onOpenPage={(n)=> openPageInPreviewByName(n)}
+                basePrefix={sidebarBox.name}
+              />
+            </div>
+          )}
                 </div>
               </div>}
         {relatedPresent && <div className='sidebar-pane sidebar-pane-related' style={{ flex: relFlex }} onMouseEnter={() => setHoveredSidePane('rel')} onMouseLeave={() => setHoveredSidePane(p => p === 'rel' ? null : p)}>
                 <div className='sidebar-subpages related-subpages'>
-                  <div className='subpages-title'>{t('related') || 'Related'}</div>
+                  <div className='subpages-title' style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                    <span>{t('related') || 'Related'}</span>
+                    <ViewModeToggle value={relView} onChange={setRelView} />
+                  </div>
                   {filteredRelated.length === 0 ? <div className='sidebar-empty'>{t('no-content')}</div> : (
-                    <CardList
-                      items={filteredRelated}
-                      currentGraph={currentGraph}
-                      preferredDateFormat={preferredDateFormat}
-                      onClick={boxOnClick}
-                      displayNameFor={(b) => displayTitle(b.name)}
-                      keyPrefix='rel'
-                    />
+                    relView === 'cards' ? (
+                      <CardList
+                        items={filteredRelated}
+                        currentGraph={currentGraph}
+                        preferredDateFormat={preferredDateFormat}
+                        onClick={boxOnClick}
+                        displayNameFor={(b) => displayTitle(b.name)}
+                        keyPrefix='rel'
+                      />
+                    ) : (
+                      <div className='related-list'>
+                        <HierarchyList
+                          items={filteredRelated}
+                          displayTitle={(n)=> displayTitle(n)}
+                          onOpenPage={(n)=> openPageInPreviewByName(n)}
+                        />
+                      </div>
+                    )
                   )}
                 </div>
               </div>}

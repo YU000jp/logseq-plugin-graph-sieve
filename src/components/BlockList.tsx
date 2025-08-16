@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { sanitizePlain as sanitizePlainUtil, isForcedHiddenPropLine as isForcedHiddenPropLineUtil, isOnlyRef as isOnlyRefUtil, isOnlyEmbed as isOnlyEmbedUtil } from '../utils/content';
+import { sanitizePlain as sanitizePlainUtil, isForcedHiddenPropLine as isForcedHiddenPropLineUtil, isOnlyRef as isOnlyRefUtil, isOnlyEmbed as isOnlyEmbedUtil, stripLogbook as stripLogbookUtil } from '../utils/content';
 import type { BlockNode } from '../utils/blockText';
+import { stripLogbookNodes } from '../utils/blockText';
 
 export function hasRenderableContent(blocks: BlockNode[], hideProperties: boolean, hideReferences: boolean, alwaysHideKeys: string[] = [], hidePageRefs = false, hideQueries = false, removeStrings: string[] = [], hideRenderers: boolean = false): boolean {
   const check = (arr: BlockNode[]): boolean => {
@@ -35,11 +36,103 @@ export function hasRenderableContent(blocks: BlockNode[], hideProperties: boolea
   return check(blocks);
 }
 
-export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; currentGraph?: string; onOpenPage?: (name: string) => void; folderMode?: boolean; stripPageBrackets?: boolean; hidePageRefs?: boolean; hideQueries?: boolean; hideRenderers?: boolean; assetsDirHandle?: FileSystemDirectoryHandle; removeStrings?: string[]; normalizeTasks?: boolean }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], currentGraph, onOpenPage, folderMode, stripPageBrackets, hidePageRefs, hideQueries, hideRenderers = false, assetsDirHandle, removeStrings = [], normalizeTasks = false }) => {
+export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; currentGraph?: string; onOpenPage?: (name: string) => void; folderMode?: boolean; stripPageBrackets?: boolean; hidePageRefs?: boolean; hideQueries?: boolean; hideRenderers?: boolean; hideEmbeds?: boolean; hideLogbook?: boolean; assetsDirHandle?: FileSystemDirectoryHandle; removeStrings?: string[]; normalizeTasks?: boolean; highlightTerms?: string[] }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], currentGraph, onOpenPage, folderMode, stripPageBrackets, hidePageRefs, hideQueries, hideRenderers = false, hideEmbeds = false, hideLogbook = true, assetsDirHandle, removeStrings = [], normalizeTasks = false, highlightTerms = [] }) => {
   const { t } = useTranslation();
   const sanitize = (s?: string) => sanitizePlainUtil(s, { removeStrings, hideProperties, alwaysHideKeys });
   const [assetUrls, setAssetUrls] = useState<Record<string,string>>({});
   const pendingRef = useRef<Set<string>>(new Set());
+  // ページ本文有無チェック用
+  const [pageHasContent, setPageHasContent] = useState<Record<string, boolean>>({});
+  const pendingPageRef = useRef<Set<string>>(new Set());
+
+  // 指定ページに本文（レンダ可能テキスト）があるかを簡易判定
+  const ensurePageHasContent = useCallback((name: string) => {
+    if (!name) return;
+    if (folderMode) return; // フォルダモードでは未サポート
+    if (pageHasContent[name] !== undefined) return;
+    if (pendingPageRef.current.has(name)) return;
+    pendingPageRef.current.add(name);
+    (async () => {
+      try {
+        // Detached モードでは API を呼ばない
+        if ((window as any).__graphSieveDetachedMode) return;
+        // getPageBlocksTree でブロック配列を取得し、本文行があるか軽くチェック
+        const tree: any[] | null = await (logseq as any).Editor.getPageBlocksTree(name).catch(() => null);
+        let has = false;
+        const inspect = (arr: any[]) => {
+          for (const b of arr) {
+            const content = (b?.content || '').toString();
+            // プロパティ行や空白のみを除外
+            const lines = content.split('\n');
+            for (const L of lines) {
+              const l = (L || '').replace(/\r/g, '');
+              if (isForcedHiddenPropLineUtil(l, alwaysHideKeys)) continue;
+              if (hideProperties && l.includes(':: ')) continue;
+              if (/^\s*$/.test(l)) continue;
+              // 純粋な参照/埋め込みのみは除外
+              const onlyRef = /^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*\(\([0-9a-fA-F-]{36}\)\)\s*$/.test(l);
+              const onlyEmbed = /^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*\{\{\s*embed\b[^}]*\}\}\s*$/i.test(l);
+              if (onlyRef || onlyEmbed) continue;
+              has = true; return;
+            }
+            if (has) return;
+            if (b.children && b.children.length) inspect(b.children);
+            if (has) return;
+          }
+        };
+        if (Array.isArray(tree)) inspect(tree);
+        setPageHasContent(prev => (prev[name] === undefined ? { ...prev, [name]: !!has } : prev));
+      } finally {
+        pendingPageRef.current.delete(name);
+      }
+    })();
+  }, [alwaysHideKeys, hideProperties, folderMode, pageHasContent]);
+
+  // 検索語ハイライト用の正規表現（大文字小文字無視）
+  const highlightRe = useMemo(() => {
+    const terms = (highlightTerms || []).map(s => (s || '').trim()).filter(Boolean);
+    if (terms.length === 0) return null as RegExp | null;
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    try {
+      return new RegExp(`(${terms.map(esc).join('|')})`, 'gi');
+    } catch {
+      return null;
+    }
+  }, [highlightTerms]);
+
+  // 文字列を <mark> で分割挿入
+  const highlightString = (text: string): Array<string | React.ReactElement> => {
+    if (!highlightRe) return [text];
+    if (!text) return [text];
+    const out: Array<string | React.ReactElement> = [];
+    let last = 0; let m: RegExpExecArray | null;
+    while ((m = highlightRe.exec(text)) !== null) {
+      const start = m.index; const end = start + m[0].length;
+      if (start > last) out.push(text.slice(last, start));
+      out.push(<mark key={`hl-${start}`} className='hl'>{m[0]}</mark>);
+      last = end;
+      // 安全ブレーク
+      if (highlightRe.lastIndex === start) highlightRe.lastIndex++;
+    }
+    if (last < text.length) out.push(text.slice(last));
+    return out.length === 0 ? [text] : out;
+  };
+
+  // ノード（文字列/要素）の子を再帰処理してハイライトを適用
+  const applyHighlight = (node: React.ReactNode): React.ReactNode => {
+    if (!highlightRe) return node;
+    if (typeof node === 'string') return highlightString(node);
+    if (Array.isArray(node)) return node.map((n, i) => <React.Fragment key={`hn-${i}`}>{applyHighlight(n)}</React.Fragment>);
+    if (React.isValidElement(node)) {
+      const props: any = node.props || {};
+      if (!('children' in props)) return node;
+      const children = props.children;
+      const newChildren = applyHighlight(children);
+      if (newChildren === children) return node;
+      return React.cloneElement(node, { ...props, children: newChildren });
+    }
+    return node;
+  };
 
   useEffect(() => {
     if (!folderMode || !assetsDirHandle) return;
@@ -78,7 +171,13 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
     });
   }, [blocks, folderMode, assetsDirHandle]);
 
-  const renderLine = (line: string, idx: number) => {
+  const renderLine = (lineIn: string, idx: number) => {
+    let line = lineIn;
+    // Optionally strip any inline {{embed ...}} macro occurrences in CONTENT view as requested
+    if (hideEmbeds) {
+      line = line.replace(/\{\{\s*embed[^}]*\}\}/gi, '').replace(/\s+$/,'');
+      if (!line.trim()) return <div key={idx} className='ls-block-line'/>;
+    }
     const mdImg = line.match(/^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*!\[([^\]]*)\]\((\.\.\/assets\/[^)]+)\)(?:\{\:[^}]*\})?/i);
     const orgImg = line.match(/^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*\[\[(\.\.\/assets\/[^\]]+)\](?:\[[^\]]*\])?\]/i);
     const assetPath = (mdImg && mdImg[2]) || (orgImg && orgImg[1]);
@@ -108,10 +207,14 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
       if (looksUrl) {
         withLinks.push(m[0]);
       } else if (onOpenPage && !hidePageRefs) {
+        // 本文有無チェック起動（非同期）
+        ensurePageHasContent(name);
+        const hasC = pageHasContent[name];
         withLinks.push(
           <a key={`ref-${idx}-${m.index}`} href='#' className='ls-page-ref'
             onClick={(e) => { e.preventDefault(); onOpenPage(name); }}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(name); } }} tabIndex={0} title={name}>
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(name); } }} tabIndex={0} title={name}
+            data-hascontent={hasC === undefined ? undefined : (hasC ? '1' : '0')}>
             {stripPageBrackets ? name : `[[${name}]]`}
           </a>
         );
@@ -127,7 +230,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
   if (hideQueries && /\{\{\s*query\b/i.test(line)) return <div key={idx} className='ls-block-line'/>;
   if (hideRenderers && /\{\{\s*renderer\b/i.test(line)) return <div key={idx} className='ls-block-line'/>;
 
-    const withMdLinks: Array<React.ReactNode> = [];
+  const withMdLinks: Array<React.ReactNode> = [];
     const getAssetUrl = (p: string): string | null => {
       if (!p.startsWith('../assets/')) return null;
       const fn = p.replace(/^\.\.\/assets\//, '');
@@ -135,17 +238,24 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
       if (currentGraph) return currentGraph.replace('logseq_local_', '') + '/' + p.replace(/^\.\.\//, '');
       return null;
     };
-    const processMdLinks = (chunk: string, baseKey: string) => {
+  const processMdLinks = (chunk: string, baseKey: string) => {
       let cursor = 0;
   const mdRe = /\[([^\]]+)\]\(([^)]+)\)/g;
   const orgRe = /\[\[([^\]]+)\](?:\[([^\]]*)\])?\]/g;
+      // ハッシュタグ（#tag）をリンク化する。条件:
+      // - 直後が空白ではない（Markdownヘッダー # Title は除外）
+      // - トークン末尾は行末か空白
+      // - 行頭「#+」(orgのディレクティブ)は除外
+      // - 可能な限り他のリンク構文より後に割り込まないよう、次候補の一つとして扱う
+      const hashRe = /(^|[^\w\]])#([^\s#]+)(?=$|\s)/g;
       const isExternal = (u: string) => /^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/|www\.|mailto:|tel:|ftp:|file:|about:|data:|blob:|chrome:|edge:|opera:)/.test(u);
       while (true) {
-        mdRe.lastIndex = cursor; orgRe.lastIndex = cursor;
-        const m1 = mdRe.exec(chunk); const m2 = orgRe.exec(chunk);
-        let next: { type: 'md'|'org'; m: RegExpExecArray } | null = null;
-        if (m1 && (!m2 || m1.index <= m2.index)) next = { type: 'md', m: m1 };
-        else if (m2) next = { type: 'org', m: m2 };
+        mdRe.lastIndex = cursor; orgRe.lastIndex = cursor; hashRe.lastIndex = cursor;
+        const m1 = mdRe.exec(chunk); const m2 = orgRe.exec(chunk); const m3 = hashRe.exec(chunk);
+        let next: { type: 'md'|'org'|'hash'; m: RegExpExecArray } | null = null;
+        if (m1 && (!m2 || m1.index <= m2.index) && (!m3 || m1.index <= m3.index)) next = { type: 'md', m: m1 };
+        else if (m2 && (!m3 || m2.index <= m3.index)) next = { type: 'org', m: m2 };
+        else if (m3) next = { type: 'hash', m: m3 };
         if (!next) break;
         const start = next.m.index;
         if (start > cursor) withMdLinks.push(chunk.slice(cursor, start));
@@ -157,10 +267,13 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
             cursor = start + next.m[0].length; continue;
           }
           if (!isExternal(href) && onOpenPage) {
+            ensurePageHasContent(href);
+            const hasC = pageHasContent[href];
             withMdLinks.push(
               <a key={`${baseKey}-md-${start}`} href='#' className='ls-page-ref'
                 onClick={(e) => { e.preventDefault(); onOpenPage(href); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(href); } }} tabIndex={0} title={href}>
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(href); } }} tabIndex={0} title={href}
+                data-hascontent={hasC === undefined ? undefined : (hasC ? '1' : '0')}>
                 {text}
               </a>
             );
@@ -168,7 +281,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
             withMdLinks.push(<a key={`${baseKey}-md-${start}`} href={href} target='_blank' rel='noopener noreferrer' className='ls-ext-link' title={text}>{text}</a>);
           }
           cursor = start + next.m[0].length;
-        } else {
+        } else if (next.type === 'org') {
           let url = next.m[1];
           const text = next.m[2] || next.m[1];
           if (url.startsWith('../assets/')) {
@@ -177,10 +290,13 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
             cursor = start + next.m[0].length; continue;
           }
           if (!isExternal(url) && onOpenPage) {
+            ensurePageHasContent(url);
+            const hasC2 = pageHasContent[url];
             withMdLinks.push(
               <a key={`${baseKey}-org-${start}`} href='#' className='ls-page-ref'
                 onClick={(e) => { e.preventDefault(); onOpenPage(url); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(url); } }} tabIndex={0} title={url}>
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(url); } }} tabIndex={0} title={url}
+                data-hascontent={hasC2 === undefined ? undefined : (hasC2 ? '1' : '0')}>
                 {text}
               </a>
             );
@@ -188,9 +304,59 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
             withMdLinks.push(<a key={`${baseKey}-org-${start}`} href={url} target='_blank' rel='noopener noreferrer' className='ls-ext-link' title={text}>{text}</a>);
           }
           cursor = start + next.m[0].length;
+        } else {
+          // hashtag
+          // m3[1] は前置境界、m3[2] がタグ名
+          const boundary = next.m[1] || '';
+          const tag = next.m[2];
+          const hashPos = start + boundary.length; // '#' の位置
+          // 行頭 #+ 除外: チャンク先頭から # までが空白のみ、かつ直後が '+'
+          const isLineStart = /^\s*$/.test(chunk.slice(0, hashPos));
+          const afterChar = chunk[hashPos + 1] || '';
+          if (isLineStart && afterChar === '+') {
+            // 除外: プレーンテキストとして扱う
+            withMdLinks.push(chunk.slice(start, start + next.m[0].length));
+            cursor = start + next.m[0].length;
+            continue;
+          }
+          if (onOpenPage && !hidePageRefs) {
+            const pageName = tag;
+            ensurePageHasContent(pageName);
+            const hasC3 = pageHasContent[pageName];
+            // 前置境界文字を保持
+            if (boundary) withMdLinks.push(boundary);
+            withMdLinks.push(
+              <a key={`${baseKey}-hash-${hashPos}`} href='#' className='ls-page-ref'
+                onClick={(e) => { e.preventDefault(); onOpenPage(pageName); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(pageName); } }} tabIndex={0} title={pageName}
+                data-hascontent={hasC3 === undefined ? undefined : (hasC3 ? '1' : '0')}>
+                #{pageName}
+              </a>
+            );
+          } else {
+            withMdLinks.push(next.m[0]);
+          }
+          cursor = start + next.m[0].length;
         }
       }
       if (cursor < chunk.length) withMdLinks.push(chunk.slice(cursor));
+      // プレーンURLを自動リンク化
+      const autoUrlRe = /(https?:\/\/[^\s)<>]+|www\.[^\s)<>]+)/g;
+      const lastIndexStart = withMdLinks.length - 1;
+      if (lastIndexStart >= 0 && typeof withMdLinks[lastIndexStart] === 'string') {
+        const s = withMdLinks[lastIndexStart] as string;
+        const parts: Array<React.ReactNode> = [];
+        let li = 0; let mm: RegExpExecArray | null;
+        while ((mm = autoUrlRe.exec(s)) !== null) {
+          const start = mm.index; const end = start + mm[0].length;
+          if (start > li) parts.push(s.slice(li, start));
+          const href = /^www\./i.test(mm[0]) ? 'https://' + mm[0] : mm[0];
+          parts.push(<a key={`${baseKey}-auto-${start}`} href={href} target='_blank' rel='noopener noreferrer' className='ls-ext-link'>{mm[0]}</a>);
+          li = end;
+        }
+        if (li < s.length) parts.push(s.slice(li));
+        if (parts.length > 0) withMdLinks[lastIndexStart] = parts;
+      }
     };
     withLinks.forEach((chunk, i) => { if (typeof chunk !== 'string') { withMdLinks.push(chunk); return; } processMdLinks(chunk, `lnk-${idx}-${i}`); });
 
@@ -260,9 +426,10 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
       }
       if (cursor < chunk.length) withEmbeds.push(chunk.slice(cursor));
     });
-    let finalNodes = withEmbeds.length ? withEmbeds : (withRefs.length ? withRefs : (withLinks.length ? withLinks : [line]));
+  let finalNodes = withEmbeds.length ? withEmbeds : (withRefs.length ? withRefs : (withLinks.length ? withLinks : [line]));
     if (hideReferences) finalNodes = finalNodes.map(n => typeof n === 'string' ? n.replace(/\{\{\s*embed[^}]*\}\}/gi,'') : n);
-    return <div key={idx} className={'ls-block-line' + (line.includes(':: ') && !hideProperties ? ' prop' : '')}>{finalNodes}</div>;
+  const highlighted = applyHighlight(finalNodes);
+  return <div key={idx} className={'ls-block-line' + (line.includes(':: ') && !hideProperties ? ' prop' : '')}>{highlighted}</div>;
   };
 
   if (!blocks || blocks.length === 0) return <div className='sidebar-empty'>{t('no-content')}</div>;
@@ -287,11 +454,13 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
     );
   };
 
+  const cleanedBlocks = hideLogbook ? stripLogbookNodes(blocks) : blocks;
   return (
     <ul className='ls-block-list'>
-      {blocks.map((b, i) => {
-        const text = sanitize(b.content);
-        let rawLines = (b.content ?? '').split('\n');
+      {cleanedBlocks.map((b, i) => {
+        const rawWithoutLog = hideLogbook ? stripLogbookUtil(b.content ?? '') : (b.content ?? '');
+        const text = sanitize(rawWithoutLog);
+        let rawLines = rawWithoutLog.split('\n');
         rawLines = rawLines.filter(line => !isForcedHiddenPropLineUtil(line, alwaysHideKeys));
         const filteredLines = rawLines.filter(line => {
           const l = line.replace(/\r/g, '');
@@ -324,7 +493,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
                     .replace(/\{\{\s*embed\s*\[\[[^\]]+\]\]\s*\}\}/gi, '')
                     .replace(/\s+/g, ' ').trim();
                   if (normalizeTasks) {
-                    const statusRe = /^(\s*)([-*+]\s+)?(TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS|HABIT|START|STARTED|DONE|CANCELED|CANCELLED)\s+/i;
+                    const statusRe = /^(\s*)([-*+]\s+)?(TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS|DONE|CANCELED|CANCELLED)\s+/i;
                     processed = processed.split('\n').map(l => {
                       if (/^\s*```/.test(l)) return l;
                       const m = l.match(statusRe); if (!m) return l; if (/^\s*[-*+]\s+\[[ xX-]\]/.test(l)) return l;
@@ -338,7 +507,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
                 }
                 if (processedLine.trim().length === 0) return null;
                 const normalized = normalizeTasks ? (() => {
-                  const statusRe = /^(\s*)([-*+]\s+)?(TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS|HABIT|START|STARTED|DONE|CANCELED|CANCELLED)\s+/i;
+                  const statusRe = /^(\s*)([-*+]\s+)?(TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS|DONE|CANCELED|CANCELLED)\s+/i;
                   return processedLine.split('\n').map(l => {
                     if (/^\s*```/.test(l)) return l;
                     const m = l.match(statusRe); if (!m) return l; if (/^\s*[-*+]\s+\[[ xX-]\]/.test(l)) return l;
@@ -351,7 +520,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
               })}
             </div>
             {b.children && b.children.length > 0 && (
-              <BlockList blocks={b.children as BlockNode[]} hideProperties={hideProperties} hideReferences={hideReferences} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={onOpenPage} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} hideRenderers={hideRenderers} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} />
+              <BlockList blocks={(hideLogbook ? stripLogbookNodes(b.children as BlockNode[]) : (b.children as BlockNode[]))} hideProperties={hideProperties} hideReferences={hideReferences} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={onOpenPage} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} hideRenderers={hideRenderers} hideEmbeds={hideEmbeds} hideLogbook={hideLogbook} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} highlightTerms={highlightTerms} />
             )}
           </li>
         );
