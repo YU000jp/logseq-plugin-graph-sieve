@@ -283,13 +283,14 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
   const processMdLinks = (chunk: string, baseKey: string) => {
       let cursor = 0;
   const mdRe = /\[([^\]]+)\]\(([^)]+)\)/g;
-  const orgRe = /\[\[([^\]]+)\](?:\[([^\]]*)\])?\]/g;
+  const orgRe = /\[\[([^\]]+)\](?:\[([^\]]*)\])?\]\]/g;
       // ハッシュタグ（#tag）をリンク化する。条件:
       // - 直後が空白ではない（Markdownヘッダー # Title は除外）
       // - トークン末尾は行末か空白
       // - 行頭 #+ 除外
       // - 可能な限り他のリンク構文より後に割り込まないよう、次候補の一つとして扱う
-      const hashRe = /(^|[^\w\]])#([^\s#]+)(?=$|\s)/g;
+  // タグ名は空白/終端/句読点/全角句読点/閉じ記号で終わる想定（日本語タグ対応）
+  const hashRe = /(^|[^\w\]])#([^\s#\]））】>、。,:;!？?]+)(?=$|\s|[\]）】>、。,:;!？?])/g;
   const isExternal = (u: string) => /^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/|www\.|mailto:|tel:|ftp:|file:|about:|data:|blob:|chrome:|edge:|opera:)/.test(u);
       while (true) {
         mdRe.lastIndex = cursor; orgRe.lastIndex = cursor; hashRe.lastIndex = cursor;
@@ -536,7 +537,28 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
               })}
             </div>
             {b.children && b.children.length > 0 && (
-              <BlockList blocks={(hideLogbook ? stripLogbookNodes(b.children as BlockNode[]) : (b.children as BlockNode[]))} hideProperties={hideProperties} hideReferences={hideReferences} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={onOpenPage} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} hideRenderers={hideRenderers} hideEmbeds={hideEmbeds} hideLogbook={hideLogbook} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} highlightTerms={highlightTerms} />
+              <BlockList
+                blocks={(hideLogbook ? stripLogbookNodes(b.children as BlockNode[]) : (b.children as BlockNode[]))}
+                hideProperties={hideProperties}
+                hideReferences={hideReferences}
+                alwaysHideKeys={alwaysHideKeys}
+                currentGraph={currentGraph}
+                onOpenPage={onOpenPage}
+                folderMode={folderMode}
+                stripPageBrackets={stripPageBrackets}
+                hidePageRefs={hidePageRefs}
+                hideQueries={hideQueries}
+                hideRenderers={hideRenderers}
+                hideEmbeds={hideEmbeds}
+                hideLogbook={hideLogbook}
+                assetsDirHandle={assetsDirHandle}
+                removeStrings={removeStrings}
+                normalizeTasks={normalizeTasks}
+                highlightTerms={highlightTerms}
+                enableHoverPreview={enableHoverPreview}
+                pagesDirHandle={pagesDirHandle}
+                journalsDirHandle={journalsDirHandle}
+              />
             )}
           </li>
         );

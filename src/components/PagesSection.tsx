@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Box } from '../db';
-import CardList from './CardList';
+import CardList, { CardListHandle } from './CardList';
 import HierarchyList from './HierarchyList';
 import ViewModeToggle, { ViewMode } from './ViewModeToggle';
 
@@ -29,6 +29,7 @@ interface Props {
 
 const PagesSection: React.FC<Props> = ({ title = 'Pages', items, mode, onChangeMode, currentGraph, preferredDateFormat, onClickCard, displayTitle, keyPrefix, highlightTitleTerms, bodyHighlightTerms, listBasePrefix, onOpenPageByName, isSelected, getSnippet, gridClassName, pagesDirHandle, journalsDirHandle }) => {
   const { t } = useTranslation();
+  const cardRef = React.useRef<CardListHandle | null>(null);
   return (
     <div className='pages-section'>
       <div className='search-header' style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -36,6 +37,7 @@ const PagesSection: React.FC<Props> = ({ title = 'Pages', items, mode, onChangeM
         <ViewModeToggle value={mode} onChange={onChangeMode} />
       </div>
       {mode === 'cards' ? (
+        <div onMouseDown={(e)=>{ if ((e.target as HTMLElement).closest('.box.card-modern')) return; try { (cardRef.current as any)?.focusFirst?.(); } catch {} }}>
         <CardList
           items={items}
           currentGraph={currentGraph}
@@ -48,7 +50,9 @@ const PagesSection: React.FC<Props> = ({ title = 'Pages', items, mode, onChangeM
           isSelected={isSelected}
           getSnippet={getSnippet}
           gridClassName={gridClassName}
+          ref={cardRef}
         />
+        </div>
       ) : (
         <div className='pages-list'>
           <HierarchyList

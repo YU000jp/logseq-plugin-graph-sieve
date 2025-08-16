@@ -9,7 +9,7 @@ import StarIcon from '@mui/icons-material/Star';
 import Clear from '@mui/icons-material/Clear';
 import { ContentCopy } from '@mui/icons-material';
 import type { Box } from '../db';
-import CardList from './CardList';
+import CardList, { CardListHandle } from './CardList';
 import { BlockList, hasRenderableContent } from './BlockList';
 import HierarchyList from './HierarchyList';
 // Ensure the correct path to the Starfield component
@@ -131,6 +131,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
   hoveredSidePane,
   setHoveredSidePane,
   } = props;
+  const subCardRef = React.useRef<CardListHandle | null>(null);
+  const relCardRef = React.useRef<CardListHandle | null>(null);
 
   const folderMode = currentGraph.startsWith('fs_');
   const normalizeTaskLines = (text: string, enable: boolean) => normalizeTaskLinesUtil(text, enable);
@@ -409,6 +411,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
                   </div>
           {subpagesDeeper && <div className='subpages-notice'>{t('subpages-deeper-notice')}</div>}
           {subView === 'cards' ? (
+            <div onMouseDown={(e)=>{ if ((e.target as HTMLElement).closest('.box.card-modern')) return; try { (subCardRef.current as any)?.focusFirst?.(); } catch {} }}>
             <CardList
               items={subpages}
               currentGraph={currentGraph}
@@ -416,7 +419,9 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
               onClick={boxOnClick}
               displayNameFor={(b) => displayTitle(b.name)}
               keyPrefix='sub'
+              ref={subCardRef}
             />
+            </div>
           ) : (
             <div className='subpages-list'>
               <HierarchyList
@@ -441,6 +446,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
                   </div>
                   {filteredRelated.length === 0 ? <div className='sidebar-empty'>{t('no-content')}</div> : (
                     relView === 'cards' ? (
+                      <div onMouseDown={(e)=>{ if ((e.target as HTMLElement).closest('.box.card-modern')) return; try { (relCardRef.current as any)?.focusFirst?.(); } catch {} }}>
                       <CardList
                         items={filteredRelated}
                         currentGraph={currentGraph}
@@ -448,7 +454,9 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
                         onClick={boxOnClick}
                         displayNameFor={(b) => displayTitle(b.name)}
                         keyPrefix='rel'
+                        ref={relCardRef}
                       />
+                      </div>
                     ) : (
                       <div className='related-list'>
                         <HierarchyList

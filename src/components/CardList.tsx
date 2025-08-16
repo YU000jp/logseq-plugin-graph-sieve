@@ -1,6 +1,7 @@
-import React, { memo, useCallback, useRef } from 'react';
+import React, { memo, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import type { Box } from '../db';
 import BoxCard from './BoxCard';
+import { useCardGridFocus } from '../hooks/useCardGridFocus';
 
 export type CardListProps = {
   items: Box[];
@@ -28,7 +29,9 @@ export type CardListProps = {
   onToggleFavorite?: (box: Box, next: boolean) => void;
 };
 
-const CardListComp: React.FC<CardListProps> = ({
+export type CardListHandle = { focusFirst: () => void };
+
+const CardListComp = forwardRef<CardListHandle, CardListProps>(({ 
   items,
   currentGraph,
   preferredDateFormat,
@@ -43,11 +46,14 @@ const CardListComp: React.FC<CardListProps> = ({
   getSnippet,
   bodyHighlightTerms,
   onToggleFavorite,
-}) => {
+}, ref) => {
   if (!items || items.length === 0) return null;
   const cls = className ? `${gridClassName} ${className}` : gridClassName;
 
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const { containerRef, onContainerClick, ensureCardFocus, focusFirst } = useCardGridFocus();
+
+  useImperativeHandle(ref, () => ({ focusFirst }), [focusFirst]);
 
   // Move focus by index
   const moveFocus = useCallback((fromIndex: number, delta: number) => {
@@ -70,6 +76,7 @@ const CardListComp: React.FC<CardListProps> = ({
   }, []);
 
   const onKeyDownGrid = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    ensureCardFocus();
     const target = e.target as HTMLElement;
     if (!target || !target.classList.contains('card-modern')) return;
     const container = gridRef.current; if (!container) return;
@@ -105,8 +112,8 @@ const CardListComp: React.FC<CardListProps> = ({
     </div>
   ));
   if (!wrapper) return <>{content}</>;
-  return <div className={cls} ref={gridRef} onKeyDown={onKeyDownGrid}>{content}</div>;
-};
+  return <div className={cls} ref={(el) => { gridRef.current = el; (containerRef as any).current = el; }} onKeyDown={onKeyDownGrid} onClick={onContainerClick}>{content}</div>;
+});
 
 export const CardList = memo(CardListComp);
 export default CardList;
