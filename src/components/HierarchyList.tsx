@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Popover, CircularProgress } from '@mui/material';
 import type { Box } from '../db';
 import { BlockList } from './BlockList';
@@ -64,102 +64,84 @@ const HierarchyList: React.FC<HierarchyListProps> = ({ items, displayTitle, onOp
   const [hoverName, setHoverName] = useState<string>('');
   const [open, setOpen] = useState<boolean>(false);
   const hideTimer = useRef<number | null>(null);
+  const overPopoverRef = useRef<boolean>(false);
 
-  const handleEnter = (e: React.MouseEvent<HTMLAnchorElement>, name: string) => {
+  const handleEnter = (e: React.MouseEvent<HTMLElement>, name: string) => {
     if (!enableHover) return;
     if (hideTimer.current) { window.clearTimeout(hideTimer.current); hideTimer.current = null; }
-    setHoverName(name);
-    setAnchorEl(e.currentTarget);
-    setOpen(true);
+    // 別リンクに移動したらプレビューをリセット（中身は必要に応じて再ロード）
+    if (hoverName !== name) {
+      setHoverName(name);
+      setPreviewBlocks(null);
+      loadedForNameRef.current = '';
+    }
+    if (!open) setOpen(true);
+    if (anchorEl !== e.currentTarget) setAnchorEl(e.currentTarget);
   };
   const delayedClose = () => {
     if (!enableHover) return;
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
-    hideTimer.current = window.setTimeout(() => { setOpen(false); setAnchorEl(null); }, 120) as unknown as number;
+    hideTimer.current = window.setTimeout(() => {
+      if (!overPopoverRef.current) { setOpen(false); setAnchorEl(null); }
+    }, 1000) as unknown as number;
   };
 
-  const PagePreviewBody: React.FC<{ name: string }> = ({ name }) => {
-    const [blocks, setBlocks] = useState<BlockNode[] | null>(null);
-    const [loading, setLoading] = useState<boolean>(false);
-    const parseBlocksFromText = (text: string): BlockNode[] => {
-      if (!text) return [];
-      // front-matter除去
-      text = text.replace(/^---[\s\S]*?---\s*/m, '');
-      // LOGBOOKを隠す
-      text = stripLogbook(text);
-      const lines = text.split(/\r?\n/);
-      type T = { indent: number; content: string; children: T[] };
-      const root: T = { indent: -1, content: '', children: [] };
-      const stack: T[] = [root];
-      const indentOf = (s: string) => (s.match(/^\s*/)?.[0].length || 0);
-      const asContent = (s: string) => s.replace(/^\s*([-*+]\s+|\d+\.\s+)?/, '');
-      for (const raw of lines) {
-        const line = raw.replace(/\r/g, '');
-        if (!line.trim()) continue;
-        const indent = indentOf(line);
-        const node: T = { indent, content: asContent(line), children: [] };
-        while (stack.length && stack[stack.length-1].indent >= indent) stack.pop();
-        (stack[stack.length-1].children as T[]).push(node);
-        stack.push(node);
+  // Preview cache (kept while hovering the same link)
+  const [previewBlocks, setPreviewBlocks] = useState<BlockNode[] | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<boolean>(false);
+  const loadedForNameRef = useRef<string>('');
+  const previewLoadingRef = useRef<boolean>(false);
+
+  const parseBlocksFromText = (text: string): BlockNode[] => {
+    if (!text) return [];
+    text = text.replace(/^---[\s\S]*?---\s*/m, ''); // front-matter
+    text = stripLogbook(text); // hide LOGBOOK
+    const lines = text.split(/\r?\n/);
+    type T = { indent: number; content: string; children: T[] };
+    const root: T = { indent: -1, content: '', children: [] };
+    const stack: T[] = [root];
+    const indentOf = (s: string) => (s.match(/^\s*/)?.[0].length || 0);
+    const asContent = (s: string) => s.replace(/^\s*([-*+]\s+|\d+\.\s+)?/, '');
+    for (const raw of lines) {
+      const line = raw.replace(/\r/g, '');
+      if (!line.trim()) continue;
+      const indent = indentOf(line);
+      const node: T = { indent, content: asContent(line), children: [] };
+      while (stack.length && stack[stack.length-1].indent >= indent) stack.pop();
+      (stack[stack.length-1].children as T[]).push(node);
+      stack.push(node);
+    }
+    const toBlock = (n: T): BlockNode => ({ content: n.content, children: n.children.map(toBlock) });
+    return root.children.map(toBlock);
+  };
+
+  const loadPreviewIfNeeded = async (name: string) => {
+    if (loadedForNameRef.current === name && (previewBlocks && previewBlocks.length >= 0)) return;
+    if (previewLoadingRef.current) return;
+    setPreviewLoading(true);
+    previewLoadingRef.current = true;
+    try {
+      let file: File | null = null;
+      if (pagesDirHandle) {
+        const vname = [name, name.replace(/\//g,'___')];
+        for (const base of vname) {
+          const fh = await pagesDirHandle.getFileHandle(base + '.md').catch(()=>null) || await pagesDirHandle.getFileHandle(base + '.org').catch(()=>null);
+          if (fh) { file = await fh.getFile(); break; }
+        }
       }
-      const toBlock = (n: T): BlockNode => ({ content: n.content, children: n.children.map(toBlock) });
-      return root.children.map(toBlock);
-    };
-    useEffect(() => {
-      let mounted = true;
-      (async () => {
-        setLoading(true);
-        try {
-          let file: File | null = null;
-          if (pagesDirHandle) {
-            const vname = [name, name.replace(/\//g,'___')];
-            for (const base of vname) {
-              const fh = await pagesDirHandle.getFileHandle(base + '.md').catch(()=>null) || await pagesDirHandle.getFileHandle(base + '.org').catch(()=>null);
-              if (fh) { file = await fh.getFile(); break; }
-            }
-          }
-          if (!file && journalsDirHandle) {
-            const vname = [name, name.replace(/\//g,'___')];
-            for (const base of vname) {
-              const fh = await journalsDirHandle.getFileHandle(base + '.md').catch(()=>null) || await journalsDirHandle.getFileHandle(base + '.org').catch(()=>null);
-              if (fh) { file = await fh.getFile(); break; }
-            }
-          }
-          let text = '';
-          if (file) text = await file.text();
-          const blocksParsed: BlockNode[] = parseBlocksFromText(text);
-          if (!mounted) return;
-          setBlocks(blocksParsed);
-        } finally { if (mounted) setLoading(false); }
-      })();
-      return () => { mounted = false; };
-    }, [name, pagesDirHandle, journalsDirHandle]);
-    const style: React.CSSProperties = { width: 600, height: 600, overflow: 'auto', padding: 8 };
-    if (loading) return <div style={{ ...style, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CircularProgress size={20} /></div>;
-    if (!blocks || blocks.length === 0) return <div style={style}>(no content)</div>;
-    return (
-      <div style={style} onMouseEnter={() => { if (hideTimer.current) { window.clearTimeout(hideTimer.current); hideTimer.current = null; } }} onMouseLeave={delayedClose}>
-        <BlockList
-          blocks={blocks}
-          hideProperties={true}
-          hideReferences={true}
-          alwaysHideKeys={[]}
-          currentGraph={currentGraph}
-          onOpenPage={onOpenPage}
-          folderMode={folderMode}
-          stripPageBrackets={false}
-          hidePageRefs={false}
-          hideQueries={false}
-          hideRenderers={false}
-          hideEmbeds={true}
-          hideLogbook={true}
-          assetsDirHandle={undefined}
-          removeStrings={[]}
-          normalizeTasks={false}
-          highlightTerms={[]}
-        />
-      </div>
-    );
+      if (!file && journalsDirHandle) {
+        const vname = [name, name.replace(/\//g,'___')];
+        for (const base of vname) {
+          const fh = await journalsDirHandle.getFileHandle(base + '.md').catch(()=>null) || await journalsDirHandle.getFileHandle(base + '.org').catch(()=>null);
+          if (fh) { file = await fh.getFile(); break; }
+        }
+      }
+      let text = '';
+      if (file) text = await file.text();
+      const blocksParsed: BlockNode[] = parseBlocksFromText(text);
+      loadedForNameRef.current = name;
+      setPreviewBlocks(blocksParsed);
+    } finally { setPreviewLoading(false); previewLoadingRef.current = false; }
   };
 
   // Pure recursive renderer
@@ -181,29 +163,39 @@ const HierarchyList: React.FC<HierarchyListProps> = ({ items, displayTitle, onOp
                     const tailRaw = lbl.slice(i + 1);
                     const tail = truncateLabel(tailRaw, truncateAt);
                     return (
-                      <a
-                        href='#'
-                        onClick={(e)=>{ e.preventDefault(); onOpenPage(n.fullName!); }}
-                        onMouseEnter={(e)=> handleEnter(e, n.fullName!)}
+                      <span
+                        className='bul-hover-zone'
+                        onMouseEnter={(e)=> { handleEnter(e, n.fullName!); void loadPreviewIfNeeded(n.fullName!); }}
                         onMouseLeave={delayedClose}
-                        className={'bul-link' + (tail.truncated ? ' truncated' : '')}
-                        title={lbl}
+                        style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}
                       >
-                        <span className='bul-dim'>{prefix}</span>
-                        <span className='bul-tail'>{tail.text}</span>
-                      </a>
+                        <a
+                          href='#'
+                          onClick={(e)=>{ e.preventDefault(); onOpenPage(n.fullName!); }}
+                          className={'bul-link' + (tail.truncated ? ' truncated' : '')}
+                          title={lbl}
+                        >
+                          <span className='bul-dim'>{prefix}</span>
+                          <span className='bul-tail'>{tail.text}</span>
+                        </a>
+                      </span>
                     );
                   }
                   // no slash: fallback to whole text
                   return (
-                    <a
-                      href='#'
-                      onClick={(e)=>{ e.preventDefault(); onOpenPage(n.fullName!); }}
-                      onMouseEnter={(e)=> handleEnter(e, n.fullName!)}
+                    <span
+                      className='bul-hover-zone'
+                      onMouseEnter={(e)=> { handleEnter(e, n.fullName!); void loadPreviewIfNeeded(n.fullName!); }}
                       onMouseLeave={delayedClose}
-                      className={'bul-link' + (t.truncated ? ' truncated' : '')}
-                      title={lbl}
-                    >{t.text}</a>
+                      style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}
+                    >
+                      <a
+                        href='#'
+                        onClick={(e)=>{ e.preventDefault(); onOpenPage(n.fullName!); }}
+                        className={'bul-link' + (t.truncated ? ' truncated' : '')}
+                        title={lbl}
+                      >{t.text}</a>
+                    </span>
                   );
                 })()
               ) : (
@@ -224,13 +216,47 @@ const HierarchyList: React.FC<HierarchyListProps> = ({ items, displayTitle, onOp
         <Popover
           open={open}
           anchorEl={anchorEl}
-          onClose={() => setOpen(false)}
+      onClose={() => { setOpen(false); /* keep cache; clear only when hovering a different link */ }}
           anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
           transformOrigin={{ vertical: 'top', horizontal: 'left' }}
           disableRestoreFocus
+      keepMounted
           slotProps={{ paper: { style: { pointerEvents: 'auto' } } as any }}
         >
-          {hoverName ? <PagePreviewBody name={hoverName} /> : <div style={{ width: 600, height: 600 }} />}
+          {hoverName ? (
+            <div style={{ maxWidth: 600, maxHeight: 600, overflow: 'auto', padding: 8 }}
+        onMouseEnter={() => { overPopoverRef.current = true; if (hideTimer.current) { window.clearTimeout(hideTimer.current); hideTimer.current = null; } }}
+        onMouseLeave={() => { overPopoverRef.current = false; delayedClose(); }}
+            >
+              {previewLoading ? (
+                <div style={{ width: '100%', height: '100%', display:'flex', alignItems:'center', justifyContent:'center' }}><CircularProgress size={20} /></div>
+              ) : (
+                (previewBlocks && previewBlocks.length > 0) ? (
+                  <BlockList
+                    blocks={previewBlocks}
+                    hideProperties={true}
+                    hideReferences={true}
+                    alwaysHideKeys={[]}
+                    currentGraph={currentGraph}
+                    onOpenPage={onOpenPage}
+                    folderMode={folderMode}
+                    stripPageBrackets={false}
+                    hidePageRefs={false}
+                    hideQueries={false}
+                    hideRenderers={false}
+                    hideEmbeds={true}
+                    hideLogbook={true}
+                    assetsDirHandle={undefined}
+                    removeStrings={[]}
+                    normalizeTasks={false}
+                    highlightTerms={[]}
+                  />
+                ) : (
+                  <div style={{ padding:'8px 12px', color:'#64748b', fontSize:12 }}>(no content)</div>
+                )
+              )}
+            </div>
+          ) : <div style={{ maxWidth: 600, maxHeight: 600 }} />}
         </Popover>
       )}
     </div>

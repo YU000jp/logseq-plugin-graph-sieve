@@ -780,16 +780,34 @@ function App() {
     if (handle.name === 'pages') {
       // pages フォルダ自身が選ばれた（journals は sibling で到達不可）
       pagesHandle = handle;
+    } else if (handle.name === 'journals') {
+      // journals フォルダが直接選ばれた場合も受け入れる（journals 単独グラフ）
+      pagesHandle = handle; // ページハンドルとして journals を採用
+  journalsHandle = null; // 二重走査を避けるため兄弟 journals は未設定
     } else {
       // ルートと仮定し pages / journals / assets を探索
       try { pagesHandle = await handle.getDirectoryHandle('pages'); } catch { pagesHandle = null; }
-  if (!pagesHandle) { logseq.UI.showMsg(t('please-select-pages')); pickingRef.current = false; setLoading(false); return; }
-      try { journalsHandle = await handle.getDirectoryHandle('journals'); } catch { journalsHandle = null; }
+      if (!pagesHandle) {
+        // pages が無い場合は journals を pages の代替として扱う
+        try { journalsHandle = await handle.getDirectoryHandle('journals'); } catch { journalsHandle = null; }
+        if (journalsHandle) {
+          pagesHandle = journalsHandle; // フォールバック: journals を pages として使用
+          journalsHandle = null;   // 後段の二重処理を避ける
+        }
+      } else {
+        // pages がある場合は journals を兄弟として取得（任意）
+        try { journalsHandle = await handle.getDirectoryHandle('journals'); } catch { journalsHandle = null; }
+      }
       try { assetsHandle = await handle.getDirectoryHandle('assets'); } catch { assetsHandle = null; }
+      if (!pagesHandle) {
+        // pages も journals も見つからない
+        logseq.UI.showMsg(t('please-select-pages'));
+        pickingRef.current = false; setLoading(false); return;
+      }
     }
     setAssetsDirHandle(assetsHandle || null as any);
     setJournalsDirHandle(journalsHandle || undefined);
-    const hashSourceHandle = pagesHandle!; // graph id hash は pages から生成
+  const hashSourceHandle = pagesHandle!; // graph id hash は pages(または journals フォールバック) から生成
     // 合成グラフID生成（最初の最大40エントリ名ハッシュ）
     let acc = 5381;
     try {
