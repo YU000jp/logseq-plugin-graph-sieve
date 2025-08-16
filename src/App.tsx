@@ -22,7 +22,7 @@ import { boxService } from './services/boxService';
 import { getString, setString, getBoolean, setBoolean, getNumber, setNumber, remove as lsRemove } from './utils/storage';
 import CardList from './components/CardList';
 import PagesSection from './components/PagesSection';
-import { displayTitle as displayTitleUtil, journalDayWeek as journalDayWeekUtil, isJournalName as isJournalNameUtil, journalVirtualKeyFromText } from './utils/journal';
+import { displayTitle as displayTitleUtil, journalDayWeek as journalDayWeekUtil, isJournalName as isJournalNameUtil, journalVirtualKeyFromText, journalDateValue as journalDateValueUtil } from './utils/journal';
 import PreviewTabs from './components/PreviewTabs';
 import PreviewPane from './components/PreviewPane';
 
@@ -802,14 +802,8 @@ function App() {
   // ジャーナル判定ヘルパ
   const isJournalName = (name: string) => isJournalNameUtil(name);
 
-  // ジャーナル日付 (ファイル名) から比較用数値 YYYYMMDD を取得 (失敗時は 0)
-  const journalDateValue = (name: string) => {
-    const decoded = name.replace(/%2F/gi, '/').replace(/^journals\//,'').replace(/\.(md|org)$/i,'');
-    const m = decoded.match(/^(\d{4})[-_]?(\d{2})[-_]?(\d{2})$/);
-    if (!m) return 0;
-    const [, y, mo, d] = m;
-    return parseInt(y + mo + d, 10) || 0;
-  };
+  // ジャーナル日付から比較用数値 YYYYMMDD を取得 (共通ユーティリティ使用)
+  const journalDateValue = (name: string) => journalDateValueUtil(name);
 
   // cardboxes から journals と non-journals を分離し journals を日時降順ソート
   // journalBoxes は useLiveQuery で取得済み
