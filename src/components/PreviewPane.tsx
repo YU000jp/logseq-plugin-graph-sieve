@@ -20,6 +20,7 @@ import { normalizeTaskLines as normalizeTaskLinesUtil, removeMacroTokens as remo
 import { setString } from '../utils/storage';
 import { isJournalName } from '../utils/journal';
 import { useHoverPagePreview } from '../hooks/useHoverPagePreview';
+import { getOpenPageLinkProps } from '../utils/openLink';
 
 export type PreviewTab = 'content' | 'nomark' | 'outline' | 'raw-custom';
 
@@ -198,10 +199,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
         : undefined;
       crumbs.push(
         <span key={`crumb-wrap-${i}`} className='ls-hover-zone' {...getHoverZoneProps(targetName)} style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}>
-          <a key={`crumb-${i}`} href='#' className='crumb ls-page-ref'
-            onClick={(e) => { e.preventDefault(); void openPageInPreviewByName(targetName); }}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openPageInPreviewByName(targetName); } }}
-            tabIndex={0} title={displayFull}
+          <a key={`crumb-${i}`} {...getOpenPageLinkProps(targetName, openPageInPreviewByName)} className='crumb ls-page-ref'
+            title={displayFull}
             data-hascontent={hasContentAttr}
           >
             <span className='crumb-text'>{label}</span>

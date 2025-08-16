@@ -4,6 +4,7 @@ import type { Box } from '../db';
 import { BlockList } from './BlockList';
 // (unused imports removed)
 import { useHoverPagePreview } from '../hooks/useHoverPagePreview';
+import { getOpenPageLinkProps } from '../utils/openLink';
 
 export interface HierarchyListProps {
   items: Box[];
@@ -91,8 +92,7 @@ const HierarchyList: React.FC<HierarchyListProps> = ({ items, displayTitle, onOp
                         style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}
                       >
                         <a
-                          href='#'
-                          onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); onOpenPage(n.fullName!); }}
+                          {...getOpenPageLinkProps(n.fullName!, onOpenPage, { stopPropagation: true })}
                           className={'bul-link' + (tail.truncated ? ' truncated' : '')}
                           title={lbl}
                         >
@@ -110,8 +110,7 @@ const HierarchyList: React.FC<HierarchyListProps> = ({ items, displayTitle, onOp
                       style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}
                     >
                       <a
-                        href='#'
-                        onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); onOpenPage(n.fullName!); }}
+                        {...getOpenPageLinkProps(n.fullName!, onOpenPage, { stopPropagation: true })}
                         className={'bul-link' + (t.truncated ? ' truncated' : '')}
                         title={lbl}
                       >{t.text}</a>

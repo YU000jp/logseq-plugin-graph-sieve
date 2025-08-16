@@ -13,7 +13,9 @@ import { Button, IconButton, InputAdornment, TextField, Tooltip, Chip, Dialog, D
 import { Clear } from '@mui/icons-material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { encodeLogseqFileName, getSummaryFromRawText, decodeLogseqFileName } from './utils';
-import { buildNameCandidates, resolveFileFromDirs } from './utils/linkResolver';
+import { parseBlocksFromText } from './utils/parseBlocks';
+// linkResolver は他所で使用。ここでは共通ロケーターを使用
+import { locatePageFile } from './utils/pageLocator';
 import { rebuildDatabase } from './services/rebuildService';
 import { boxService } from './services/boxService';
 // query services are used within rebuildService
@@ -436,89 +438,15 @@ function App() {
       return limited;
     });
 
-    // 2) フォルダからファイルを読み取り、簡易ブロックへ変換
+    // 2) フォルダからファイルを読み取り、簡易ブロックへ変換（ページ探索はツールチップと共通）
     try {
       const pagesHandle = dirHandles[box.graph];
       if (!pagesHandle) throw new Error('No directory handle for graph ' + box.graph);
-
-      const attemptLocate = async (): Promise<{ file: File; picked: string } | null> => {
-        const primaryBase = encodeLogseqFileName(box.name);
-        const nameVariants = Array.from(new Set([
-          box.name,
-          primaryBase,
-          box.name.replace(/\//g,'___')
-        ]));
-        const exts = ['.md', '.org'];
-        const tryInDir = async (dir: FileSystemDirectoryHandle): Promise<{file: File; picked: string} | null> => {
-          for (const v of nameVariants) {
-            for (const ext of exts) {
-              const candidate = v + ext;
-              const fh = await dir.getFileHandle(candidate).catch(()=>null);
-              if (fh) { const f = await fh.getFile(); return { file: f, picked: candidate }; }
-            }
-          }
-          try {
-            for await (const [entryName, entry] of (dir as any).entries()) {
-              if (!entryName || entry.kind !== 'file' || !/\.(md|org)$/i.test(entryName)) continue;
-              const base = entryName.replace(/\.(md|org)$/i,'');
-              if (decodeLogseqFileName(base) === box.name) {
-                const fh = await dir.getFileHandle(entryName).catch(()=>null);
-                if (fh) { const f = await fh.getFile(); return { file: f, picked: entryName }; }
-              }
-            }
-          } catch {/* ignore */}
-          return null;
-        };
-
-        let located = await tryInDir(pagesHandle);
-        if (located) return located;
-        const subJournals = await pagesHandle.getDirectoryHandle('journals').catch(()=>null);
-        if (subJournals) {
-          located = await tryInDir(subJournals);
-          if (located) return located;
-        }
-        if (journalsDirHandle) {
-          located = await tryInDir(journalsDirHandle);
-          if (located) return located;
-        }
-        return null;
-      };
-
-      const found = await attemptLocate();
+      const found = await locatePageFile(box.name, pagesHandle, journalsDirHandle, { scanFallback: true });
       if (!found) throw new Error('File not found for ' + box.name);
       const { file } = found;
       const text = await file.text();
-
-  const parseBullets = (src: string): BlockNode[] => {
-        const bulletRe = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
-  const root: BlockNode[] = [];
-  const stack: { level: number; node: BlockNode }[] = [];
-        const normIndent = (s: string) => s.replace(/\t/g, '  ').length;
-        let id = 0;
-        for (const rawLine of src.split(/\r?\n/)) {
-          const line = rawLine.replace(/\s+$/,'');
-          if (!line.trim()) continue;
-          const m = line.match(bulletRe);
-          if (m) {
-            const level = Math.floor(normIndent(m[1]) / 2);
-            const content = m[3];
-            const node: BlockNode = { uuid: `fs-${box.name}-${id++}`, content, children: [] };
-            while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
-            if (stack.length === 0) root.push(node); else stack[stack.length - 1].node.children.push(node);
-            stack.push({ level, node });
-          } else {
-            if (stack.length) {
-              const cur = stack[stack.length - 1].node;
-              cur.content = cur.content ? cur.content + '\n' + line.trim() : line.trim();
-            } else {
-              root.push({ uuid: `fs-${box.name}-${id++}`, content: line.trim(), children: [] });
-            }
-          }
-        }
-        return root;
-      };
-
-  let blocks: BlockNode[] = parseBullets(text);
+      let blocks: BlockNode[] = parseBlocksFromText(text) as any;
       if (!blocks || blocks.length === 0) {
         const paras = text.split(/\n{2,}/).map(s => s.trim()).filter(Boolean);
         blocks = paras.map((p, i) => ({ uuid: `fs-${box.name}-p${i}`, content: p, children: [] }));
@@ -881,29 +809,12 @@ function App() {
 
   // toJournalPageNameIfDate は BlockList 内で使用するため、関数自体はモジュールスコープ版を下部に定義。
 
-  // フォルダモードでページ名からファイル(File)を特定
+  // フォルダモードでページ名からファイル(File)を特定（共通ロケーター使用）
   const locateFolderModeFile = useCallback(async (pageName: string): Promise<{ file: File; picked: string } | null> => {
     if (!currentGraph.startsWith('fs_')) return null;
     const pagesHandle = dirHandles[currentGraph];
     if (!pagesHandle) return null;
-    let candidates = buildNameCandidates(pageName);
-    // Prefer journals via virtual key when pageName includes a full date
-    // e.g., "2025-01-01" or text containing 20250101
-    try {
-      const vkey = journalVirtualKeyFromText(pageName);
-      if (vkey) {
-        const y = vkey.slice(0,4), m = vkey.slice(4,6), d = vkey.slice(6,8);
-        const jName = `${y}_${m}_${d}`;
-        const preferred = [
-          `journals/${jName}`, jName, `${y}/${m}/${d}`, `journals/${y}/${m}/${d}`
-        ];
-        candidates = Array.from(new Set([...preferred, ...candidates]));
-      }
-    } catch {}
-    // try pages root, pages/journals, external journals handle; with fallback scan
-    const subJournals = await pagesHandle.getDirectoryHandle('journals').catch(()=>null);
-    const found = await resolveFileFromDirs([pagesHandle, subJournals, journalsDirHandle], candidates, { scanFallback: true });
-    return found;
+    return await locatePageFile(pageName, pagesHandle, journalsDirHandle, { scanFallback: true });
   }, [currentGraph, journalsDirHandle]);
 
   // ジャーナル判定ヘルパ
@@ -1264,8 +1175,7 @@ function App() {
       let locatedText = '';
       if (located) locatedText = await located.file.text();
       // Fallback: if no file found OR text is effectively empty, try journal virtual-key
-      let usedFallback = false;
-      if ((!located) || !locatedText.trim()) {
+  if ((!located) || !locatedText.trim()) {
         try {
           const vkey = journalVirtualKeyFromText(name);
           if (vkey) {
@@ -1276,7 +1186,7 @@ function App() {
               const altFound = await locateFolderModeFile(alt);
               if (altFound) {
                 const t = await altFound.file.text();
-                if (t.trim()) { located = altFound; locatedText = t; usedFallback = true; break; }
+        if (t.trim()) { located = altFound; locatedText = t; break; }
               }
             }
           }
@@ -1287,9 +1197,6 @@ function App() {
         const summary = summaryRaw.length === 0 ? [''] : summaryRaw;
         // Keep original requested name to avoid surprising breadcrumb changes
         const box: Box = { graph: currentGraph, name, uuid: '', time: located.file.lastModified, summary, image } as Box;
-        if (!usedFallback) {
-          try { await boxService.upsert(box); } catch {/* ignore */}
-        }
         void openInSidebar(box);
       } else {
         const box: Box = { graph: currentGraph, name, uuid: '', time: Date.now(), summary: [], image: '' } as Box;

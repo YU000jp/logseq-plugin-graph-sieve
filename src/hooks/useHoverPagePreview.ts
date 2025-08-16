@@ -1,8 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { BlockNode } from '../utils/blockText';
 import { stripLogbook as stripLogbookUtil } from '../utils/content';
-import { buildNameCandidates, resolveFileFromDirs } from '../utils/linkResolver';
-import { journalVirtualKeyFromText } from '../utils/journal';
+import { locatePageFile } from '../utils/pageLocator';
 
 export interface HoverPreviewOptions {
   enable: boolean;
@@ -104,18 +103,8 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
     setPreviewLoading(true);
     previewLoadingRef.current = true;
     try {
-  let candidates = buildNameCandidates(name); // includes journal virtual-key expansions
-  const vkey = journalVirtualKeyFromText(name);
-  if (vkey) {
-    const y = vkey.slice(0,4), m = vkey.slice(4,6), d = vkey.slice(6,8);
-    const jName = `${y}_${m}_${d}`;
-    const preferred = [
-      `journals/${jName}`, jName, `${y}/${m}/${d}`, `journals/${y}/${m}/${d}`
-    ];
-    candidates = Array.from(new Set([...preferred, ...candidates]));
-  }
-  const located = await resolveFileFromDirs([pagesDirHandle, journalsDirHandle], candidates, { scanFallback: true });
-  const file: File | null = located?.file || null;
+      const located = await locatePageFile(name, pagesDirHandle, journalsDirHandle, { scanFallback: true });
+      const file: File | null = located?.file || null;
       let text = '';
       if (file) text = await file.text();
       const blocksParsed: BlockNode[] = parseBlocksFromText(text);

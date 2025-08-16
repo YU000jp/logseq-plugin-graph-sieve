@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { sanitizePlain as sanitizePlainUtil, isForcedHiddenPropLine as isForcedHiddenPropLineUtil, isOnlyRef as isOnlyRefUtil, isOnlyEmbed as isOnlyEmbedUtil, stripLogbook as stripLogbookUtil } from '../utils/content';
 import type { BlockNode } from '../utils/blockText';
 import { stripLogbookNodes } from '../utils/blockText';
+import { getOpenPageLinkProps } from '../utils/openLink';
 
 export function hasRenderableContent(blocks: BlockNode[], hideProperties: boolean, hideReferences: boolean, alwaysHideKeys: string[] = [], hidePageRefs = false, hideQueries = false, removeStrings: string[] = [], hideRenderers: boolean = false): boolean {
   const check = (arr: BlockNode[]): boolean => {
@@ -94,19 +95,15 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
         {...getHoverZoneProps(pageName)}
         style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}>
         <a
-          href='#'
+          {...(onOpenPage ? getOpenPageLinkProps(pageName, onOpenPage) : { href: '#', tabIndex: 0 })}
           className='ls-page-ref'
-          onClick={(e) => { e.preventDefault(); onOpenPage && onOpenPage(pageName); }}
-          onAuxClick={(e) => { const btn = (e as any).button; if (btn === 1) { e.preventDefault(); onOpenPage && onOpenPage(pageName); } }}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage && onOpenPage(pageName); } }}
-          tabIndex={0}
     title={pageName}
     data-hascontent={hasC === undefined ? undefined : (hasC ? '1' : '0')}
     // Note: data-hascontent-label is styled via CSS; i18n labels are provided in CSS for now.
     data-hascontent-label={hasC === undefined ? undefined : (hasC ? t('has-content') : t('no-content'))}
   aria-label={`${pageName}${hasC === undefined ? '' : hasC ? ' — ' + (t('has-content') as string) : ' — ' + (t('no-content') as string)}`}
   aria-describedby={(open && hoverName === pageName) ? 'gs-hover-popover' : undefined}
-        >
+  >
           {label}
         </a>
       </span>
