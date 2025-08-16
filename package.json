@@ -10,6 +10,7 @@
     "dev": "vite",
     "build:dev": "tsc && vite build --mode development",
     "build": "tsc && vite build",
+    "test": "vitest run",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "release": "npm run build && rm -r release && mkdir release && cp -r dist images release && cp icon.png LICENSE package.json README.md release",
@@ -47,7 +48,8 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "typescript": "^5.9.2",
     "vite": "^7.1.2",
-    "vite-plugin-logseq": "^1.1.2"
+    "vite-plugin-logseq": "^1.1.2",
+    "vitest": "^1.6.1"
   },
   "logseq": {
     "id": "logseq-graph-sieve-250811",
