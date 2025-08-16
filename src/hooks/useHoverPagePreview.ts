@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { BlockNode } from '../utils/blockText';
-import { stripLogbook as stripLogbookUtil } from '../utils/content';
 import { locatePageFile } from '../utils/pageLocator';
+import { parseBlocksFromText } from '../utils/parseBlocks';
 
 export interface HoverPreviewOptions {
   enable: boolean;
@@ -65,28 +65,7 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
     }
   }, [cacheMax, cacheTTLms]);
 
-  const parseBlocksFromText = useCallback((text: string): BlockNode[] => {
-    if (!text) return [];
-    text = text.replace(/^---[\s\S]*?---\s*/m, '');
-    text = stripLogbookUtil(text);
-    const lines = text.split(/\r?\n/);
-    type T = { indent: number; content: string; children: T[] };
-    const root: T = { indent: -1, content: '', children: [] };
-    const stack: T[] = [root];
-    const indentOf = (s: string) => (s.match(/^\s*/)?.[0].length || 0);
-    const asContent = (s: string) => s.replace(/^\s*([-*+]\s+|\d+\.\s+)?/, '');
-    for (const raw of lines) {
-      const line = raw.replace(/\r/g, '');
-      if (!line.trim()) continue;
-      const indent = indentOf(line);
-      const node: T = { indent, content: asContent(line), children: [] };
-      while (stack.length && stack[stack.length-1].indent >= indent) stack.pop();
-      (stack[stack.length-1].children as T[]).push(node);
-      stack.push(node);
-    }
-    const toBlock = (n: T): BlockNode => ({ content: n.content, children: n.children.map(toBlock) });
-    return root.children.map(toBlock);
-  }, []);
+  // パースは共通ユーティリティを利用
 
   const loadPreviewIfNeeded = useCallback(async (name: string) => {
     if (!enable || !folderMode) return;

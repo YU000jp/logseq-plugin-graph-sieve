@@ -1,4 +1,5 @@
-import { buildNameCandidates, resolveFileFromDirs } from './linkResolver';
+// file resolution is delegated to pageLocator
+import { locatePageFile } from './pageLocator';
 
 type Listener = (graph: string | undefined, name: string, value: boolean) => void;
 
@@ -72,12 +73,11 @@ export const ensureHasContentChecked = async (
       } catch {}
       return;
     }
-    // folder mode
+    // folder mode: 共通ロケーターを使用
     try {
-      const candidates = buildNameCandidates(name);
-      const hit = await resolveFileFromDirs([env.pagesDirHandle || null, env.journalsDirHandle || null], candidates, { scanFallback: false });
-      if (!hit) { cache.set(k, false); emit(graph, name, false); return; }
-      const text = await hit.file.text();
+      const located = await locatePageFile(name, env.pagesDirHandle || undefined, env.journalsDirHandle || undefined, { scanFallback: false });
+      if (!located) { cache.set(k, false); emit(graph, name, false); return; }
+      const text = await located.file.text();
       const ok = textHasRenderable(text, env);
       cache.set(k, !!ok);
       emit(graph, name, !!ok);
