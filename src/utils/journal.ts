@@ -93,7 +93,12 @@ export function toJournalPageNameIfDateUsing(pattern: string, s: string): string
 // Flexible detection: find a date substring like YYYY[-_/ .]MM[-_/ .]DD or YYYYMMDD
 export function inferJournalFromTextFlexible(s: string): string | null {
   if (!s) return null;
-  const decoded = s.replace(/%2F/gi, '/');
+  const decoded = s
+    .replace(/%2F/gi, '/')
+    .replace(/[／]/g, '/')
+    .replace(/[－ー―–—‐]/g, '-')
+    .replace(/年/g, '/').replace(/月/g, '/').replace(/日/g, '')
+    .replace(/\s+/g, ' ');
   // 1) YYYYMMDD contiguous
   const m1 = /\b(\d{4})(\d{2})(\d{2})\b/.exec(decoded);
   if (m1) {
@@ -126,4 +131,24 @@ export function inferJournalPageNameFromText(text: string, pattern?: string): st
     if (byPattern) return byPattern;
   }
   return inferJournalFromTextFlexible(text);
+}
+
+// Return a virtual key YYYYMMDD for a given text if it represents a full date
+// Accepts: journals/YYYY_MM_DD(.md/.org), YYYY-MM-DD, YYYY/MM/DD, contiguous YYYYMMDD, etc.
+export function journalVirtualKeyFromText(text: string): string | null {
+  if (!text) return null;
+  const decoded = text.replace(/%2F/gi, '/');
+  const noExt = decoded.replace(/\.(md|org)$/i, '');
+  // direct match (with optional journals/ prefix and separators)
+  let m = /^(?:journals\/)?(\d{4})[-_\/]?(\d{2})[-_\/]?(\d{2})$/.exec(noExt);
+  if (m) {
+    const y = m[1], M = m[2], d = m[3];
+    return `${y}${M}${d}`;
+  }
+  // flexible inference inside the text (must be full date)
+  const inferred = inferJournalPageNameFromText(noExt);
+  if (inferred) {
+    return inferred.replace(/_/g, ''); // YYYYMMDD
+  }
+  return null;
 }

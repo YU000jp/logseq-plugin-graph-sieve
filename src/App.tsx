@@ -20,7 +20,7 @@ import { boxService } from './services/boxService';
 import { getString, setString, getBoolean, setBoolean, getNumber, setNumber, remove as lsRemove } from './utils/storage';
 import CardList from './components/CardList';
 import PagesSection from './components/PagesSection';
-import { displayTitle as displayTitleUtil, journalDayWeek as journalDayWeekUtil, isJournalName as isJournalNameUtil } from './utils/journal';
+import { displayTitle as displayTitleUtil, journalDayWeek as journalDayWeekUtil, isJournalName as isJournalNameUtil, journalVirtualKeyFromText } from './utils/journal';
 import PreviewTabs from './components/PreviewTabs';
 import PreviewPane from './components/PreviewPane';
 
@@ -886,7 +886,20 @@ function App() {
     if (!currentGraph.startsWith('fs_')) return null;
     const pagesHandle = dirHandles[currentGraph];
     if (!pagesHandle) return null;
-    const candidates = buildNameCandidates(pageName);
+    let candidates = buildNameCandidates(pageName);
+    // Prefer journals via virtual key when pageName includes a full date
+    // e.g., "2025-01-01" or text containing 20250101
+    try {
+      const vkey = journalVirtualKeyFromText(pageName);
+      if (vkey) {
+        const y = vkey.slice(0,4), m = vkey.slice(4,6), d = vkey.slice(6,8);
+        const jName = `${y}_${m}_${d}`;
+        const preferred = [
+          `journals/${jName}`, jName, `${y}/${m}/${d}`, `journals/${y}/${m}/${d}`
+        ];
+        candidates = Array.from(new Set([...preferred, ...candidates]));
+      }
+    } catch {}
     // try pages root, pages/journals, external journals handle; with fallback scan
     const subJournals = await pagesHandle.getDirectoryHandle('journals').catch(()=>null);
     const found = await resolveFileFromDirs([pagesHandle, subJournals, journalsDirHandle], candidates, { scanFallback: true });
@@ -1247,13 +1260,36 @@ function App() {
       return;
     }
     try {
-      const located = await locateFolderModeFile(name);
+      let located = await locateFolderModeFile(name);
+      let locatedText = '';
+      if (located) locatedText = await located.file.text();
+      // Fallback: if no file found OR text is effectively empty, try journal virtual-key
+      let usedFallback = false;
+      if ((!located) || !locatedText.trim()) {
+        try {
+          const vkey = journalVirtualKeyFromText(name);
+          if (vkey) {
+            const y = vkey.slice(0,4), m = vkey.slice(4,6), d = vkey.slice(6,8);
+            const jName = `${y}_${m}_${d}`;
+            const tryNames = [`journals/${jName}`, jName, `${y}/${m}/${d}`, `journals/${y}/${m}/${d}`];
+            for (const alt of tryNames) {
+              const altFound = await locateFolderModeFile(alt);
+              if (altFound) {
+                const t = await altFound.file.text();
+                if (t.trim()) { located = altFound; locatedText = t; usedFallback = true; break; }
+              }
+            }
+          }
+        } catch { /* ignore */ }
+      }
       if (located) {
-        const text = await located.file.text();
-        const [summaryRaw, image] = getSummaryFromRawText(text);
+        const [summaryRaw, image] = getSummaryFromRawText(locatedText || '');
         const summary = summaryRaw.length === 0 ? [''] : summaryRaw;
+        // Keep original requested name to avoid surprising breadcrumb changes
         const box: Box = { graph: currentGraph, name, uuid: '', time: located.file.lastModified, summary, image } as Box;
-  try { await boxService.upsert(box); } catch {/* ignore */}
+        if (!usedFallback) {
+          try { await boxService.upsert(box); } catch {/* ignore */}
+        }
         void openInSidebar(box);
       } else {
         const box: Box = { graph: currentGraph, name, uuid: '', time: Date.now(), summary: [], image: '' } as Box;

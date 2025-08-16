@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { BlockNode } from '../utils/blockText';
 import { stripLogbook as stripLogbookUtil } from '../utils/content';
 import { buildNameCandidates, resolveFileFromDirs } from '../utils/linkResolver';
+import { journalVirtualKeyFromText } from '../utils/journal';
 
 export interface HoverPreviewOptions {
   enable: boolean;
@@ -12,6 +13,8 @@ export interface HoverPreviewOptions {
   onOpenPage?: (name: string) => void;
   showDelayMs?: number; // default 1500
   minVisibleMs?: number; // default 2000
+  cacheMax?: number; // default 50
+  cacheTTLms?: number; // default 120_000 (2m)
 }
 
 export interface HoverPreviewApi {
@@ -33,7 +36,7 @@ export interface HoverPreviewApi {
 }
 
 export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi {
-  const { enable, folderMode, pagesDirHandle, journalsDirHandle, showDelayMs = 1500, minVisibleMs = 2000 } = opts;
+  const { enable, folderMode, pagesDirHandle, journalsDirHandle, showDelayMs = 1500, minVisibleMs = 2000, cacheMax = 50, cacheTTLms = 120_000 } = opts;
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [hoverName, setHoverName] = useState<string>('');
   const [open, setOpen] = useState<boolean>(false);
@@ -46,6 +49,22 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
   const minVisibleUntilRef = useRef<number>(0);
   const loadedForNameRef = useRef<string>('');
   const previewLoadingRef = useRef<boolean>(false);
+  // Simple in-memory cache with TTL and max size
+  const cacheRef = useRef<Map<string, { t: number; blocks: BlockNode[] }>>(new Map());
+  const pruneCache = useCallback(() => {
+    const now = Date.now();
+    const cache = cacheRef.current;
+    // remove expired
+    for (const [k, v] of cache) {
+      if (now - v.t > cacheTTLms) cache.delete(k);
+    }
+    // trim size
+    if (cache.size > cacheMax) {
+      const entries = Array.from(cache.entries()).sort((a, b) => a[1].t - b[1].t);
+      const excess = cache.size - cacheMax;
+      for (let i = 0; i < excess; i++) cache.delete(entries[i][0]);
+    }
+  }, [cacheMax, cacheTTLms]);
 
   const parseBlocksFromText = useCallback((text: string): BlockNode[] => {
     if (!text) return [];
@@ -72,12 +91,29 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
 
   const loadPreviewIfNeeded = useCallback(async (name: string) => {
     if (!enable || !folderMode) return;
+    // Try cache first
+    pruneCache();
+    const cached = cacheRef.current.get(name);
+    if (cached) {
+      loadedForNameRef.current = name;
+      setPreviewBlocks(cached.blocks);
+      return;
+    }
     if (loadedForNameRef.current === name && (previewBlocks && previewBlocks.length >= 0)) return;
     if (previewLoadingRef.current) return;
     setPreviewLoading(true);
     previewLoadingRef.current = true;
     try {
-  const candidates = buildNameCandidates(name);
+  let candidates = buildNameCandidates(name); // includes journal virtual-key expansions
+  const vkey = journalVirtualKeyFromText(name);
+  if (vkey) {
+    const y = vkey.slice(0,4), m = vkey.slice(4,6), d = vkey.slice(6,8);
+    const jName = `${y}_${m}_${d}`;
+    const preferred = [
+      `journals/${jName}`, jName, `${y}/${m}/${d}`, `journals/${y}/${m}/${d}`
+    ];
+    candidates = Array.from(new Set([...preferred, ...candidates]));
+  }
   const located = await resolveFileFromDirs([pagesDirHandle, journalsDirHandle], candidates, { scanFallback: true });
   const file: File | null = located?.file || null;
       let text = '';
@@ -85,8 +121,10 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
       const blocksParsed: BlockNode[] = parseBlocksFromText(text);
       loadedForNameRef.current = name;
       setPreviewBlocks(blocksParsed);
+      cacheRef.current.set(name, { t: Date.now(), blocks: blocksParsed });
+      pruneCache();
     } finally { setPreviewLoading(false); previewLoadingRef.current = false; }
-  }, [enable, folderMode, pagesDirHandle, journalsDirHandle, parseBlocksFromText, previewBlocks]);
+  }, [enable, folderMode, pagesDirHandle, journalsDirHandle, parseBlocksFromText, previewBlocks, pruneCache]);
 
   const startShowTimer = useCallback((target: HTMLElement, name: string) => {
     if (!enable) return;

@@ -137,6 +137,16 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
   const removeMacroTokens = (text: string, enable: boolean, alsoQueries: boolean) => removeMacroTokensUtil(text, enable, alsoQueries);
   const [copyHover, setCopyHover] = useState(false);
   const [settingsHover, setSettingsHover] = useState(false);
+  // Underline markers toggle (persisted)
+  const [underlineMarkersEnabled, setUnderlineMarkersEnabled] = useState<boolean>(() => {
+    const v = localStorage.getItem('underlineMarkersEnabled');
+    return v === null ? true : v === 'true';
+  });
+  React.useEffect(() => {
+    localStorage.setItem('underlineMarkersEnabled', String(underlineMarkersEnabled));
+    const cls = 'gs-underline-off';
+    if (!underlineMarkersEnabled) document.body.classList.add(cls); else document.body.classList.remove(cls);
+  }, [underlineMarkersEnabled]);
 
   // Hover preview for breadcrumb links (folder mode only)
   const { getHoverZoneProps, open, anchorEl, hoverName, previewBlocks, previewLoading, popoverProps } = useHoverPagePreview({
@@ -144,6 +154,10 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
     folderMode,
     pagesDirHandle,
     journalsDirHandle,
+    showDelayMs: Number(localStorage.getItem('hoverShowDelayMs') || '1500') || 1500,
+    minVisibleMs: Number(localStorage.getItem('hoverMinVisibleMs') || '2000') || 2000,
+    cacheMax: Number(localStorage.getItem('hoverCacheMax') || '50') || 50,
+    cacheTTLms: Number(localStorage.getItem('hoverCacheTTLms') || '120000') || 120000,
   });
 
   // Breadcrumb builder
@@ -178,18 +192,26 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
       const label = segments[i];
       const targetName = isJournalSingle ? journalVirtualPaths[i] : rawSegments.slice(0, i + 1).join('/');
       const displayFull = isJournalSingle ? journalVirtualPaths[i] : segments.slice(0, i + 1).join('/');
+      // data-hascontent はフォルダモードでは hover 時の previewBlocks で判定（直近 hoverName が一致して読み込み済みのとき）
+      const hasContentAttr = (folderMode && hoverName === targetName && !previewLoading)
+        ? ((previewBlocks && previewBlocks.length > 0) ? '1' : '0')
+        : undefined;
       crumbs.push(
         <span key={`crumb-wrap-${i}`} className='ls-hover-zone' {...getHoverZoneProps(targetName)} style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}>
-          <a key={`crumb-${i}`} href='#' className='crumb'
+          <a key={`crumb-${i}`} href='#' className='crumb ls-page-ref'
             onClick={(e) => { e.preventDefault(); void openPageInPreviewByName(targetName); }}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openPageInPreviewByName(targetName); } }}
-            tabIndex={0} title={displayFull}><span className='crumb-text'>{label}</span></a>
+            tabIndex={0} title={displayFull}
+            data-hascontent={hasContentAttr}
+          >
+            <span className='crumb-text'>{label}</span>
+          </a>
         </span>
       );
       if (i < segments.length - 1) crumbs.push(<span key={`sep-${i}`} className='sep'> / </span>);
     }
     return <div className='breadcrumb'>{crumbs}</div>;
-  }, [sidebarBox.name, displayTitle, openPageInPreviewByName]);
+  }, [sidebarBox.name, displayTitle, openPageInPreviewByName, folderMode, hoverName, previewLoading, previewBlocks, getHoverZoneProps]);
 
   const isJournalPreview = isJournalName(sidebarBox.name);
 
@@ -241,6 +263,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={stripPageBrackets} onChange={(_, v) => setStripPageBrackets(v)} />} label={t('toggle-strip-page-brackets') || 'Strip [[ ]]'} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={!hidePageRefs} onChange={(_, v) => setHidePageRefs(!v)} />} label={t('toggle-page-links') || t('toggle-hide-page-refs') || 'Page links'} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={hideQueries} onChange={(_, v) => setHideQueries(v)} />} label={t('toggle-hide-queries') || 'Hide queries'} />
+          <FormControlLabel className='prop-filter' disabled={false} control={<Switch size='small' checked={underlineMarkersEnabled} onChange={(_, v) => setUnderlineMarkersEnabled(v)} />} label={'Underline markers'} />
         </div>
         <div className='sidebar-row sidebar-row--filters small-text'>
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={hideRenderers} onChange={(_, v) => setHideRenderers(v)} />} label={t('toggle-hide-renderers') || 'Hide renderers'} />
@@ -251,6 +274,11 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
         <div className='sidebar-row sidebar-row--options small-text'>
           <TextField size='small' label={t('always-hide-props')} placeholder={t('always-hide-props-ph')} value={alwaysHidePropKeys} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { const v = e.target.value; setAlwaysHidePropKeys(v); setString('alwaysHideProps', v); }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px' }} />
           <TextField size='small' label={t('remove-strings')} placeholder={t('remove-strings-ph')} value={removeStringsRaw} disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} onChange={(e) => { setRemoveStringsRaw(e.target.value); }} InputProps={{ inputProps: { spellCheck: false } }} style={{ minWidth: '220px', marginLeft: '8px' }} />
+          {/* Hover tuning (advanced) */}
+          <TextField size='small' type='number' label='Hover show delay (ms)' value={Number(localStorage.getItem('hoverShowDelayMs') || '1500')} onChange={(e) => localStorage.setItem('hoverShowDelayMs', String(Math.max(0, Number(e.target.value)||0)))} InputProps={{ inputProps: { min: 0 } }} style={{ width: 170 }} />
+          <TextField size='small' type='number' label='Hover min visible (ms)' value={Number(localStorage.getItem('hoverMinVisibleMs') || '2000')} onChange={(e) => localStorage.setItem('hoverMinVisibleMs', String(Math.max(0, Number(e.target.value)||0)))} InputProps={{ inputProps: { min: 0 } }} style={{ width: 170 }} />
+          <TextField size='small' type='number' label='Hover cache max' value={Number(localStorage.getItem('hoverCacheMax') || '50')} onChange={(e) => localStorage.setItem('hoverCacheMax', String(Math.max(1, Number(e.target.value)||1)))} InputProps={{ inputProps: { min: 1 } }} style={{ width: 140 }} />
+          <TextField size='small' type='number' label='Hover cache TTL (ms)' value={Number(localStorage.getItem('hoverCacheTTLms') || '120000')} onChange={(e) => localStorage.setItem('hoverCacheTTLms', String(Math.max(1000, Number(e.target.value)||1000)))} InputProps={{ inputProps: { min: 1000 } }} style={{ width: 170 }} />
         </div>
       </div>}
         <div className='sidebar-row sidebar-row--actions'>
@@ -450,7 +478,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
           transformOrigin={{ vertical: 'top', horizontal: 'left' }}
           disableRestoreFocus
           keepMounted
-          slotProps={{ paper: { style: { pointerEvents: 'auto' } } as any }}
+      slotProps={{ paper: { style: { pointerEvents: 'auto' }, role: 'dialog', id: 'gs-hover-popover-bc', 'aria-live': 'polite' } as any }}
         >
           {hoverName ? (
             <div
@@ -458,6 +486,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
               onMouseEnter={popoverProps.onMouseEnter}
               onMouseLeave={popoverProps.onMouseLeave}
               onMouseOver={popoverProps.onMouseOver}
+        aria-busy={previewLoading ? 'true' : 'false'}
             >
               {previewLoading ? (
                 <div style={{ width: '100%', height: '100%', display:'flex', alignItems:'center', justifyContent:'center' }}><CircularProgress size={20} /></div>

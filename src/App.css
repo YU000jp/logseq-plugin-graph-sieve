@@ -741,21 +741,34 @@
           mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23000"><path d="M3 5a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5z"/></svg>') no-repeat 50% 50% / contain;
 }
 
-/* 本文あり/なしの表示（data-hascontent 属性で制御） */
-.ls-page-ref[data-hascontent="1"]::before,
-.ls-page-ref[data-hascontent="0"]::before {
-  content: attr(data-hascontent-label);
-  display: inline-block;
-  font-size: 10px;
-  padding: 0 4px;
-  margin-right: 6px;
-  border-radius: 10px;
-  line-height: 1.4;
-  vertical-align: baseline;
+/* 本文あり/なしの表示（data-hascontent 属性で制御）: 下線で示す（CSS変数で調整可） */
+:root {
+  --gs-link-underline-width: 2px;
+  --gs-link-underline-width-hover: 3px;
+  --gs-link-underline-color-has: #0ea5e9; /* sky-500 */
+  --gs-link-underline-color-none: #f97316; /* orange-500 */
+  --gs-link-underline-style-has: solid;
+  --gs-link-underline-style-none: dashed;
 }
-/* 既定のラベル（i18n がまだ無いので CSS のみで簡易表示）*/
-.ls-page-ref[data-hascontent="1"]::before { content: "本文あり"; color:#155e75; background:#cffafe; border:1px solid #a5f3fc; }
-.ls-page-ref[data-hascontent="0"]::before { content: "本文なし"; color:#7a271a; background:#ffedd5; border:1px solid #fed7aa; }
+.ls-page-ref[data-hascontent] {
+  text-decoration: none; /* 既定の下線はオフ */
+  border-bottom: var(--gs-link-underline-width) solid transparent;
+  padding-bottom: 1px; /* 下線の視認性調整 */
+}
+.ls-page-ref[data-hascontent="1"] {
+  border-bottom-color: var(--gs-link-underline-color-has);
+  border-bottom-style: var(--gs-link-underline-style-has);
+  border-bottom-width: var(--gs-link-underline-width);
+}
+.ls-page-ref[data-hascontent="0"] {
+  border-bottom-color: var(--gs-link-underline-color-none);
+  border-bottom-style: var(--gs-link-underline-style-none);
+  border-bottom-width: var(--gs-link-underline-width);
+}
+/* hover 時のフィードバック（太さを少し増やす） */
+.ls-page-ref[data-hascontent]:hover { text-decoration: none; border-bottom-width: var(--gs-link-underline-width-hover); }
+/* 全体で下線を無効化したい場合（設定で切替） */
+.gs-underline-off .ls-page-ref[data-hascontent] { border-bottom: none !important; }
 .ls-page-ref {
   color: #1a73e8;
   text-decoration: none;

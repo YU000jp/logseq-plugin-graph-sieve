@@ -1,4 +1,5 @@
 import { encodeLogseqFileName, decodeLogseqFileName } from '../utils';
+import { inferJournalPageNameFromText } from './journal';
 
 export const buildNameCandidates = (rawName: string): string[] => {
   const out: string[] = [];
@@ -24,6 +25,24 @@ export const buildNameCandidates = (rawName: string): string[] => {
   // journals with underscore replacements too
   const ju = n0.replace(/^journals\//i,'').replace(/\//g,'___');
   add('journals/' + ju);
+  // ---- Journal virtual-key support from date-like titles or embedded dates ----
+  // If text can be parsed as a full date (not just year or year/month),
+  // map to journals/YYYY_MM_DD and related variants. Accepts contiguous YYYYMMDD or with separators.
+  const j0 = inferJournalPageNameFromText(n0) || undefined;
+  const j1 = inferJournalPageNameFromText(n1) || undefined;
+  const jPick = j0 || j1;
+  if (jPick) {
+    // jPick is like YYYY_MM_DD
+    const js = jPick.replace(/_/g, '/'); // YYYY/MM/DD (virtual path)
+    const jk = jPick.replace(/_/g, '');  // virtual key YYYYMMDD (for labeling/debug)
+    add(jPick);
+    add('journals/' + jPick);
+    add(js);
+    add('journals/' + js);
+    // also add encoded/underscored forms will be handled later via encodeLogseqFileName
+    // Keep the virtual key as a candidate too (some higher layers may use it as a lookup key)
+    add(jk);
+  }
   // date variants YYYY[-_\/]MM[-_\/]DD
   const dn = (s: string) => {
     const m = s.match(/^(\d{4})[-_\/]?(\d{2})[-_\/]?(\d{2})$/);

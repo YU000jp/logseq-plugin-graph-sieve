@@ -53,6 +53,10 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
     folderMode,
     pagesDirHandle,
     journalsDirHandle,
+    showDelayMs: Number(localStorage.getItem('hoverShowDelayMs') || '1500') || 1500,
+    minVisibleMs: Number(localStorage.getItem('hoverMinVisibleMs') || '2000') || 2000,
+    cacheMax: Number(localStorage.getItem('hoverCacheMax') || '50') || 50,
+    cacheTTLms: Number(localStorage.getItem('hoverCacheTTLms') || '120000') || 120000,
   });
 
   // 指定ページに本文（レンダ可能テキスト）があるかを簡易判定
@@ -100,10 +104,19 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
 
   // 内部ページリンク描画（共通処理）
   const renderInternalPageLink = useCallback((pageName: string, label: string, key: string) => {
-    // 本文有無チェック起動（非同期）
-    ensurePageHasContent(pageName);
-    const hasC = pageHasContent[pageName];
-    return (
+    // 本文有無チェック（モード別）
+    let hasC: boolean | undefined = undefined;
+    if (folderMode) {
+      // フォルダモードでは hover 時に読み込んだ previewBlocks から判定
+      if (hoverName === pageName && !previewLoading) {
+        hasC = !!(previewBlocks && previewBlocks.length > 0);
+      }
+    } else {
+      // API による軽量チェック
+      ensurePageHasContent(pageName);
+      hasC = pageHasContent[pageName];
+    }
+  return (
       <span key={key} className='ls-hover-zone'
         {...getHoverZoneProps(pageName)}
         style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}>
@@ -114,14 +127,18 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
           onAuxClick={(e) => { const btn = (e as any).button; if (btn === 1) { e.preventDefault(); onOpenPage && onOpenPage(pageName); } }}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage && onOpenPage(pageName); } }}
           tabIndex={0}
-          title={pageName}
-          data-hascontent={hasC === undefined ? undefined : (hasC ? '1' : '0')}
+    title={pageName}
+    data-hascontent={hasC === undefined ? undefined : (hasC ? '1' : '0')}
+    // Note: data-hascontent-label is styled via CSS; i18n labels are provided in CSS for now.
+    data-hascontent-label={hasC === undefined ? undefined : (hasC ? t('has-content') : t('no-content'))}
+  aria-label={`${pageName}${hasC === undefined ? '' : hasC ? ' — ' + (t('has-content') as string) : ' — ' + (t('no-content') as string)}`}
+  aria-describedby={(open && hoverName === pageName) ? 'gs-hover-popover' : undefined}
         >
           {label}
         </a>
       </span>
     );
-  }, [ensurePageHasContent, getHoverZoneProps, onOpenPage, pageHasContent]);
+  }, [ensurePageHasContent, getHoverZoneProps, onOpenPage, pageHasContent, folderMode, hoverName, previewLoading, previewBlocks]);
 
   // 検索語ハイライト用の正規表現（大文字小文字無視）
   const highlightRe = useMemo(() => {
@@ -270,7 +287,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
       // ハッシュタグ（#tag）をリンク化する。条件:
       // - 直後が空白ではない（Markdownヘッダー # Title は除外）
       // - トークン末尾は行末か空白
-      // - 行頭「#+」(orgのディレクティブ)は除外
+      // - 行頭 #+ 除外
       // - 可能な限り他のリンク構文より後に割り込まないよう、次候補の一つとして扱う
       const hashRe = /(^|[^\w\]])#([^\s#]+)(?=$|\s)/g;
   const isExternal = (u: string) => /^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/|www\.|mailto:|tel:|ftp:|file:|about:|data:|blob:|chrome:|edge:|opera:)/.test(u);
@@ -534,14 +551,15 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
         transformOrigin={{ vertical: 'top', horizontal: 'left' }}
         disableRestoreFocus
         keepMounted
-        slotProps={{ paper: { style: { pointerEvents: 'auto' } } as any }}
+        slotProps={{ paper: { style: { pointerEvents: 'auto' }, role: 'dialog', id: 'gs-hover-popover', 'aria-live': 'polite' } as any }}
       >
     {hoverName ? (
-          <div
+      <div
             style={{ maxWidth: 600, maxHeight: 600, overflow: 'auto', padding: 8 }}
       onMouseEnter={popoverProps.onMouseEnter}
       onMouseLeave={popoverProps.onMouseLeave}
       onMouseOver={popoverProps.onMouseOver}
+    aria-busy={previewLoading ? 'true' : 'false'}
           >
       {previewLoading ? (
               <div style={{ width: '100%', height: '100%', display:'flex', alignItems:'center', justifyContent:'center' }}><CircularProgress size={20} /></div>
