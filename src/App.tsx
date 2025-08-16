@@ -13,6 +13,7 @@ import { Button, IconButton, InputAdornment, TextField, Tooltip, Chip, Dialog, D
 import { Clear } from '@mui/icons-material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { encodeLogseqFileName, getSummaryFromRawText, decodeLogseqFileName } from './utils';
+import { buildNameCandidates, resolveFileFromDirs } from './utils/linkResolver';
 import { rebuildDatabase } from './services/rebuildService';
 import { boxService } from './services/boxService';
 // query services are used within rebuildService
@@ -885,47 +886,11 @@ function App() {
     if (!currentGraph.startsWith('fs_')) return null;
     const pagesHandle = dirHandles[currentGraph];
     if (!pagesHandle) return null;
-    const variants: string[] = [pageName, encodeLogseqFileName(pageName), pageName.replace(/\//g,'___')];
-    // 日付フォーマット YYYY/MM/DD => YYYY_MM_DD も試す (journals/ プレフィックスも)
-    const dateSlash = pageName.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
-    if (dateSlash) {
-      const underscored = `${dateSlash[1]}_${dateSlash[2]}_${dateSlash[3]}`;
-      variants.push(underscored, `journals/${underscored}`);
-    }
-    const nameVariants = Array.from(new Set(variants));
-    const exts = ['.md', '.org'];
-    const tryInDir = async (dir: FileSystemDirectoryHandle): Promise<{file: File; picked: string} | null> => {
-      for (const v of nameVariants) {
-        for (const ext of exts) {
-          const candidate = v + ext;
-          const fh = await dir.getFileHandle(candidate).catch(()=>null);
-          if (fh) { const f = await fh.getFile(); return { file: f, picked: candidate }; }
-        }
-      }
-      try {
-        for await (const [entryName, entry] of (dir as any).entries()) {
-          if (!entryName || entry.kind !== 'file' || !/\.(md|org)$/i.test(entryName)) continue;
-          const base = entryName.replace(/\.(md|org)$/i,'');
-          if (decodeLogseqFileName(base) === pageName) {
-            const fh = await dir.getFileHandle(entryName).catch(()=>null);
-            if (fh) { const f = await fh.getFile(); return { file: f, picked: entryName }; }
-          }
-        }
-      } catch {/* ignore */}
-      return null;
-    };
-    let located = await tryInDir(pagesHandle);
-    if (located) return located;
+    const candidates = buildNameCandidates(pageName);
+    // try pages root, pages/journals, external journals handle; with fallback scan
     const subJournals = await pagesHandle.getDirectoryHandle('journals').catch(()=>null);
-    if (subJournals) {
-      located = await tryInDir(subJournals);
-      if (located) return located;
-    }
-    if (journalsDirHandle) {
-      located = await tryInDir(journalsDirHandle);
-      if (located) return located;
-    }
-    return null;
+    const found = await resolveFileFromDirs([pagesHandle, subJournals, journalsDirHandle], candidates, { scanFallback: true });
+    return found;
   }, [currentGraph, journalsDirHandle]);
 
   // ジャーナル判定ヘルパ
@@ -1611,6 +1576,10 @@ function App() {
               currentGraph={currentGraph}
               preferredDateFormat={preferredDateFormat}
               assetsDirHandle={assetsDirHandle}
+              
+              // pass handles for hover preview in PreviewPane
+              pagesDirHandle={currentDirHandle}
+              journalsDirHandle={journalsDirHandle}
 
               hideLogbook={hideLogbook}
               setHideLogbook={setHideLogbook}

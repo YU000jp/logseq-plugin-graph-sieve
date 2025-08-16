@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Popover, CircularProgress } from '@mui/material';
+import { useHoverPagePreview } from '../hooks/useHoverPagePreview';
 import { useTranslation } from 'react-i18next';
 import { sanitizePlain as sanitizePlainUtil, isForcedHiddenPropLine as isForcedHiddenPropLineUtil, isOnlyRef as isOnlyRefUtil, isOnlyEmbed as isOnlyEmbedUtil, stripLogbook as stripLogbookUtil } from '../utils/content';
 import type { BlockNode } from '../utils/blockText';
@@ -36,7 +38,7 @@ export function hasRenderableContent(blocks: BlockNode[], hideProperties: boolea
   return check(blocks);
 }
 
-export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; currentGraph?: string; onOpenPage?: (name: string) => void; folderMode?: boolean; stripPageBrackets?: boolean; hidePageRefs?: boolean; hideQueries?: boolean; hideRenderers?: boolean; hideEmbeds?: boolean; hideLogbook?: boolean; assetsDirHandle?: FileSystemDirectoryHandle; removeStrings?: string[]; normalizeTasks?: boolean; highlightTerms?: string[] }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], currentGraph, onOpenPage, folderMode, stripPageBrackets, hidePageRefs, hideQueries, hideRenderers = false, hideEmbeds = false, hideLogbook = true, assetsDirHandle, removeStrings = [], normalizeTasks = false, highlightTerms = [] }) => {
+export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean; hideReferences?: boolean; alwaysHideKeys?: string[]; currentGraph?: string; onOpenPage?: (name: string) => void; folderMode?: boolean; stripPageBrackets?: boolean; hidePageRefs?: boolean; hideQueries?: boolean; hideRenderers?: boolean; hideEmbeds?: boolean; hideLogbook?: boolean; assetsDirHandle?: FileSystemDirectoryHandle; removeStrings?: string[]; normalizeTasks?: boolean; highlightTerms?: string[]; enableHoverPreview?: boolean; pagesDirHandle?: FileSystemDirectoryHandle; journalsDirHandle?: FileSystemDirectoryHandle }> = ({ blocks, hideProperties, hideReferences, alwaysHideKeys = [], currentGraph, onOpenPage, folderMode, stripPageBrackets, hidePageRefs, hideQueries, hideRenderers = false, hideEmbeds = false, hideLogbook = true, assetsDirHandle, removeStrings = [], normalizeTasks = false, highlightTerms = [], enableHoverPreview = false, pagesDirHandle, journalsDirHandle }) => {
   const { t } = useTranslation();
   const sanitize = (s?: string) => sanitizePlainUtil(s, { removeStrings, hideProperties, alwaysHideKeys });
   const [assetUrls, setAssetUrls] = useState<Record<string,string>>({});
@@ -44,6 +46,14 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
   // ページ本文有無チェック用
   const [pageHasContent, setPageHasContent] = useState<Record<string, boolean>>({});
   const pendingPageRef = useRef<Set<string>>(new Set());
+
+  // === Hover preview via reusable hook ===
+  const { getHoverZoneProps, open, anchorEl, hoverName, previewBlocks, previewLoading, popoverProps } = useHoverPagePreview({
+    enable: !!enableHoverPreview && !!folderMode,
+    folderMode,
+    pagesDirHandle,
+    journalsDirHandle,
+  });
 
   // 指定ページに本文（レンダ可能テキスト）があるかを簡易判定
   const ensurePageHasContent = useCallback((name: string) => {
@@ -87,6 +97,31 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
       }
     })();
   }, [alwaysHideKeys, hideProperties, folderMode, pageHasContent]);
+
+  // 内部ページリンク描画（共通処理）
+  const renderInternalPageLink = useCallback((pageName: string, label: string, key: string) => {
+    // 本文有無チェック起動（非同期）
+    ensurePageHasContent(pageName);
+    const hasC = pageHasContent[pageName];
+    return (
+      <span key={key} className='ls-hover-zone'
+        {...getHoverZoneProps(pageName)}
+        style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}>
+        <a
+          href='#'
+          className='ls-page-ref'
+          onClick={(e) => { e.preventDefault(); onOpenPage && onOpenPage(pageName); }}
+          onAuxClick={(e) => { const btn = (e as any).button; if (btn === 1) { e.preventDefault(); onOpenPage && onOpenPage(pageName); } }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage && onOpenPage(pageName); } }}
+          tabIndex={0}
+          title={pageName}
+          data-hascontent={hasC === undefined ? undefined : (hasC ? '1' : '0')}
+        >
+          {label}
+        </a>
+      </span>
+    );
+  }, [ensurePageHasContent, getHoverZoneProps, onOpenPage, pageHasContent]);
 
   // 検索語ハイライト用の正規表現（大文字小文字無視）
   const highlightRe = useMemo(() => {
@@ -196,7 +231,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
       return <div key={idx} className='ls-block-line image'><a href={src} target='_blank' rel='noopener noreferrer' className='ls-img-link'><img src={src} alt={(mdImg && mdImg[1]) || ''} className='ls-img' /></a></div>;
     }
 
-    const withLinks: Array<React.ReactNode> = [];
+  const withLinks: Array<React.ReactNode> = [];
     let lastIndex = 0;
     const regex = /\[\[([^\]]+)\]\]/g; let m: RegExpExecArray | null;
     while ((m = regex.exec(line)) !== null) {
@@ -207,17 +242,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
       if (looksUrl) {
         withLinks.push(m[0]);
       } else if (onOpenPage && !hidePageRefs) {
-        // 本文有無チェック起動（非同期）
-        ensurePageHasContent(name);
-        const hasC = pageHasContent[name];
-        withLinks.push(
-          <a key={`ref-${idx}-${m.index}`} href='#' className='ls-page-ref'
-            onClick={(e) => { e.preventDefault(); onOpenPage(name); }}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(name); } }} tabIndex={0} title={name}
-            data-hascontent={hasC === undefined ? undefined : (hasC ? '1' : '0')}>
-            {stripPageBrackets ? name : `[[${name}]]`}
-          </a>
-        );
+        withLinks.push(renderInternalPageLink(name, stripPageBrackets ? name : `[[${name}]]`, `ref-wrap-${idx}-${m.index}`));
       } else {
         withLinks.push(m[0]);
       }
@@ -248,7 +273,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
       // - 行頭「#+」(orgのディレクティブ)は除外
       // - 可能な限り他のリンク構文より後に割り込まないよう、次候補の一つとして扱う
       const hashRe = /(^|[^\w\]])#([^\s#]+)(?=$|\s)/g;
-      const isExternal = (u: string) => /^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/|www\.|mailto:|tel:|ftp:|file:|about:|data:|blob:|chrome:|edge:|opera:)/.test(u);
+  const isExternal = (u: string) => /^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/|www\.|mailto:|tel:|ftp:|file:|about:|data:|blob:|chrome:|edge:|opera:)/.test(u);
       while (true) {
         mdRe.lastIndex = cursor; orgRe.lastIndex = cursor; hashRe.lastIndex = cursor;
         const m1 = mdRe.exec(chunk); const m2 = orgRe.exec(chunk); const m3 = hashRe.exec(chunk);
@@ -267,16 +292,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
             cursor = start + next.m[0].length; continue;
           }
           if (!isExternal(href) && onOpenPage) {
-            ensurePageHasContent(href);
-            const hasC = pageHasContent[href];
-            withMdLinks.push(
-              <a key={`${baseKey}-md-${start}`} href='#' className='ls-page-ref'
-                onClick={(e) => { e.preventDefault(); onOpenPage(href); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(href); } }} tabIndex={0} title={href}
-                data-hascontent={hasC === undefined ? undefined : (hasC ? '1' : '0')}>
-                {text}
-              </a>
-            );
+            withMdLinks.push(renderInternalPageLink(href, text, `${baseKey}-md-wrap-${start}`));
           } else {
             withMdLinks.push(<a key={`${baseKey}-md-${start}`} href={href} target='_blank' rel='noopener noreferrer' className='ls-ext-link' title={text}>{text}</a>);
           }
@@ -290,16 +306,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
             cursor = start + next.m[0].length; continue;
           }
           if (!isExternal(url) && onOpenPage) {
-            ensurePageHasContent(url);
-            const hasC2 = pageHasContent[url];
-            withMdLinks.push(
-              <a key={`${baseKey}-org-${start}`} href='#' className='ls-page-ref'
-                onClick={(e) => { e.preventDefault(); onOpenPage(url); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(url); } }} tabIndex={0} title={url}
-                data-hascontent={hasC2 === undefined ? undefined : (hasC2 ? '1' : '0')}>
-                {text}
-              </a>
-            );
+            withMdLinks.push(renderInternalPageLink(url, text, `${baseKey}-org-wrap-${start}`));
           } else {
             withMdLinks.push(<a key={`${baseKey}-org-${start}`} href={url} target='_blank' rel='noopener noreferrer' className='ls-ext-link' title={text}>{text}</a>);
           }
@@ -321,18 +328,9 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
           }
           if (onOpenPage && !hidePageRefs) {
             const pageName = tag;
-            ensurePageHasContent(pageName);
-            const hasC3 = pageHasContent[pageName];
             // 前置境界文字を保持
             if (boundary) withMdLinks.push(boundary);
-            withMdLinks.push(
-              <a key={`${baseKey}-hash-${hashPos}`} href='#' className='ls-page-ref'
-                onClick={(e) => { e.preventDefault(); onOpenPage(pageName); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPage(pageName); } }} tabIndex={0} title={pageName}
-                data-hascontent={hasC3 === undefined ? undefined : (hasC3 ? '1' : '0')}>
-                #{pageName}
-              </a>
-            );
+            withMdLinks.push(renderInternalPageLink(pageName, `#${pageName}`, `${baseKey}-hash-wrap-${hashPos}`));
           } else {
             withMdLinks.push(next.m[0]);
           }
@@ -456,6 +454,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
 
   const cleanedBlocks = hideLogbook ? stripLogbookNodes(blocks) : blocks;
   return (
+  <div className='ls-block-list-wrap'>
     <ul className='ls-block-list'>
       {cleanedBlocks.map((b, i) => {
         const rawWithoutLog = hideLogbook ? stripLogbookUtil(b.content ?? '') : (b.content ?? '');
@@ -525,6 +524,59 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
           </li>
         );
       })}
-    </ul>
+  </ul>
+  { (!!enableHoverPreview && !!folderMode) && (
+      <Popover
+    open={open}
+    anchorEl={anchorEl}
+    onClose={popoverProps.onClose}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+        disableRestoreFocus
+        keepMounted
+        slotProps={{ paper: { style: { pointerEvents: 'auto' } } as any }}
+      >
+    {hoverName ? (
+          <div
+            style={{ maxWidth: 600, maxHeight: 600, overflow: 'auto', padding: 8 }}
+      onMouseEnter={popoverProps.onMouseEnter}
+      onMouseLeave={popoverProps.onMouseLeave}
+      onMouseOver={popoverProps.onMouseOver}
+          >
+      {previewLoading ? (
+              <div style={{ width: '100%', height: '100%', display:'flex', alignItems:'center', justifyContent:'center' }}><CircularProgress size={20} /></div>
+            ) : (
+        (previewBlocks && previewBlocks.length > 0) ? (
+                <BlockList
+                  blocks={previewBlocks}
+                  hideProperties={true}
+                  hideReferences={true}
+                  alwaysHideKeys={[]}
+                  currentGraph={currentGraph}
+                  onOpenPage={onOpenPage}
+                  folderMode={folderMode}
+                  stripPageBrackets={false}
+                  hidePageRefs={false}
+                  hideQueries={false}
+                  hideRenderers={false}
+                  hideEmbeds={true}
+                  hideLogbook={true}
+                  assetsDirHandle={undefined}
+                  removeStrings={[]}
+                  normalizeTasks={false}
+                  highlightTerms={[]}
+                  enableHoverPreview={true}
+                  pagesDirHandle={pagesDirHandle}
+                  journalsDirHandle={journalsDirHandle}
+                />
+              ) : (
+                <div style={{ padding:'8px 12px', color:'#64748b', fontSize:12 }}>(no content)</div>
+              )
+            )}
+          </div>
+    ) : <div style={{ maxWidth: 600, maxHeight: 600 }} />}
+      </Popover>
+  )}
+    </div>
   );
 };

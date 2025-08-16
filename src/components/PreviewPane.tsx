@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, FormControlLabel, IconButton, Switch, TextField, Tooltip } from '@mui/material';
+import { Button, FormControlLabel, IconButton, Switch, TextField, Tooltip, Popover, CircularProgress } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
@@ -12,11 +12,14 @@ import type { Box } from '../db';
 import CardList from './CardList';
 import { BlockList, hasRenderableContent } from './BlockList';
 import HierarchyList from './HierarchyList';
+// Ensure the correct path to the Starfield component
+const Starfield = React.lazy(() => import('./Starfield')); // Update the path if necessary
 import ViewModeToggle from './ViewModeToggle';
 import { PlainTextView, RawCustomView, blocksToPlainText, outlineTextFromBlocks, flattenBlocksToText, type BlockNode } from '../utils/blockText';
 import { normalizeTaskLines as normalizeTaskLinesUtil, removeMacroTokens as removeMacroTokensUtil } from '../utils/text';
 import { setString } from '../utils/storage';
 import { isJournalName } from '../utils/journal';
+import { useHoverPagePreview } from '../hooks/useHoverPagePreview';
 
 export type PreviewTab = 'content' | 'nomark' | 'outline' | 'raw-custom';
 
@@ -64,6 +67,8 @@ export interface PreviewPaneProps {
   currentGraph: string;
   preferredDateFormat: string;
   assetsDirHandle?: FileSystemDirectoryHandle;
+  pagesDirHandle?: FileSystemDirectoryHandle;
+  journalsDirHandle?: FileSystemDirectoryHandle;
 
   // Related content
   subpages: Box[];
@@ -117,6 +122,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
     currentGraph,
     preferredDateFormat,
   assetsDirHandle,
+  pagesDirHandle,
+  journalsDirHandle,
   subpages,
   subpagesDeeper,
   related,
@@ -130,6 +137,14 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
   const removeMacroTokens = (text: string, enable: boolean, alsoQueries: boolean) => removeMacroTokensUtil(text, enable, alsoQueries);
   const [copyHover, setCopyHover] = useState(false);
   const [settingsHover, setSettingsHover] = useState(false);
+
+  // Hover preview for breadcrumb links (folder mode only)
+  const { getHoverZoneProps, open, anchorEl, hoverName, previewBlocks, previewLoading, popoverProps } = useHoverPagePreview({
+    enable: !!folderMode,
+    folderMode,
+    pagesDirHandle,
+    journalsDirHandle,
+  });
 
   // Breadcrumb builder
   const breadcrumb = useMemo(() => {
@@ -164,10 +179,12 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
       const targetName = isJournalSingle ? journalVirtualPaths[i] : rawSegments.slice(0, i + 1).join('/');
       const displayFull = isJournalSingle ? journalVirtualPaths[i] : segments.slice(0, i + 1).join('/');
       crumbs.push(
-        <a key={`crumb-${i}`} href='#' className='crumb'
-          onClick={(e) => { e.preventDefault(); void openPageInPreviewByName(targetName); }}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openPageInPreviewByName(targetName); } }}
-          tabIndex={0} title={displayFull}><span className='crumb-text'>{label}</span></a>
+        <span key={`crumb-wrap-${i}`} className='ls-hover-zone' {...getHoverZoneProps(targetName)} style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}>
+          <a key={`crumb-${i}`} href='#' className='crumb'
+            onClick={(e) => { e.preventDefault(); void openPageInPreviewByName(targetName); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openPageInPreviewByName(targetName); } }}
+            tabIndex={0} title={displayFull}><span className='crumb-text'>{label}</span></a>
+        </span>
       );
       if (i < segments.length - 1) crumbs.push(<span key={`sep-${i}`} className='sep'> / </span>);
     }
@@ -328,15 +345,29 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
                   {sidebarLoading ? <div className='sidebar-loading'>{t('loading-content')}</div> : sidebarTab === 'content' ? (() => {
                     const has = hasRenderableContent((sidebarBlocks || []) as BlockNode[], hideProperties, true, alwaysHideKeys, hidePageRefs, hideQueries, removeStrings, hideRenderers);
                     if (has) {
-                      return <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} hideRenderers={hideRenderers} hideEmbeds={true} hideLogbook={hideLogbook} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} highlightTerms={highlightTerms} />;
+                        return <BlockList blocks={sidebarBlocks || []} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} currentGraph={currentGraph} onOpenPage={openPageInPreviewByName} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hidePageRefs={hidePageRefs} hideQueries={hideQueries} hideRenderers={hideRenderers} hideEmbeds={true} hideLogbook={hideLogbook} assetsDirHandle={assetsDirHandle} removeStrings={removeStrings} normalizeTasks={normalizeTasks} highlightTerms={highlightTerms} enableHoverPreview={true} pagesDirHandle={pagesDirHandle} journalsDirHandle={journalsDirHandle} />;
                     }
                     // ジャーナルは refs/queries のみで構成されることがあるためフォールバックで本文表示
                     if (isJournalPreview) {
                       return <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={false} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={false} removeStrings={removeStrings} hideLogbook={hideLogbook} />;
                     }
-                    // 空配列/nullの時は空表示
-                    if (!sidebarBlocks || (Array.isArray(sidebarBlocks) && sidebarBlocks.length === 0)) {
-                      return <div className='sidebar-empty'>{t('no-content')}</div>;
+                    // 空配列と未選択/未ロードを区別して表示
+                    if (!sidebarBlocks) {
+                      // 未選択/未ロード相当: ガイダンス＋背景アニメ
+                      return (
+                        <div className='sidebar-empty' style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', position:'relative', minHeight: 280 }}>
+                          <div style={{ zIndex: 1, padding: '8px 12px', color:'#64748b', fontSize:14, textAlign:'center' }}>カードを選択するとここに内容を表示します</div>
+                          <div style={{ position:'absolute', inset:0, opacity:0.9, pointerEvents:'none' }}>
+                            <React.Suspense fallback={null}>
+                              <Starfield />
+                            </React.Suspense>
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (Array.isArray(sidebarBlocks) && sidebarBlocks.length === 0) {
+                      // 選択中ページだが本文なし: (no content)
+                      return <div className='sidebar-empty'>{t('no-content') || '(no content)'}</div>;
                     }
                     return <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} hideLogbook={hideLogbook} />;
                   })() : sidebarTab === 'nomark' ? <PlainTextView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} folderMode={folderMode} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} /> : sidebarTab === 'outline' ? <RawCustomView blocks={(sidebarBlocks || []) as BlockNode[]} hideProperties={hideProperties} hideReferences={true} alwaysHideKeys={alwaysHideKeys} stripPageBrackets={stripPageBrackets} hideQueries={hideQueries} removeStrings={removeStrings} folderMode={folderMode} normalizeTasks={normalizeTasks} hideLogbook={hideLogbook} /> : null}
@@ -365,6 +396,10 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
                 displayTitle={(n)=> displayTitle(n)}
                 onOpenPage={(n)=> openPageInPreviewByName(n)}
                 basePrefix={sidebarBox.name}
+                enableHoverPreview={true}
+                currentGraph={currentGraph}
+                pagesDirHandle={pagesDirHandle}
+                journalsDirHandle={journalsDirHandle}
               />
             </div>
           )}
@@ -392,6 +427,10 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
                           items={filteredRelated}
                           displayTitle={(n)=> displayTitle(n)}
                           onOpenPage={(n)=> openPageInPreviewByName(n)}
+                          enableHoverPreview={true}
+                          currentGraph={currentGraph}
+                          pagesDirHandle={pagesDirHandle}
+                          journalsDirHandle={journalsDirHandle}
                         />
                       </div>
                     )
@@ -402,6 +441,58 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
           );
         })()}
       </div>
+      {folderMode && (
+        <Popover
+          open={open}
+          anchorEl={anchorEl}
+          onClose={popoverProps.onClose}
+          anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          disableRestoreFocus
+          keepMounted
+          slotProps={{ paper: { style: { pointerEvents: 'auto' } } as any }}
+        >
+          {hoverName ? (
+            <div
+              style={{ maxWidth: 600, maxHeight: 600, overflow: 'auto', padding: 8 }}
+              onMouseEnter={popoverProps.onMouseEnter}
+              onMouseLeave={popoverProps.onMouseLeave}
+              onMouseOver={popoverProps.onMouseOver}
+            >
+              {previewLoading ? (
+                <div style={{ width: '100%', height: '100%', display:'flex', alignItems:'center', justifyContent:'center' }}><CircularProgress size={20} /></div>
+              ) : (
+                (previewBlocks && previewBlocks.length > 0) ? (
+                  <BlockList
+                    blocks={previewBlocks}
+                    hideProperties={true}
+                    hideReferences={true}
+                    alwaysHideKeys={[]}
+                    currentGraph={currentGraph}
+                    onOpenPage={openPageInPreviewByName}
+                    folderMode={folderMode}
+                    stripPageBrackets={false}
+                    hidePageRefs={false}
+                    hideQueries={false}
+                    hideRenderers={false}
+                    hideEmbeds={true}
+                    hideLogbook={true}
+                    assetsDirHandle={undefined}
+                    removeStrings={[]}
+                    normalizeTasks={false}
+                    highlightTerms={[]}
+                    enableHoverPreview={true}
+                    pagesDirHandle={pagesDirHandle}
+                    journalsDirHandle={journalsDirHandle}
+                  />
+                ) : (
+                  <div style={{ padding:'8px 12px', color:'#64748b', fontSize:12 }}>(no content)</div>
+                )
+              )}
+            </div>
+          ) : <div style={{ maxWidth: 600, maxHeight: 600 }} />}
+        </Popover>
+      )}
     </div>
   );
 };

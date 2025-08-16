@@ -1,9 +1,9 @@
-import React, { useRef, useState } from 'react';
+import React from 'react';
 import { Popover, CircularProgress } from '@mui/material';
 import type { Box } from '../db';
 import { BlockList } from './BlockList';
-import type { BlockNode } from '../utils/blockText';
-import { stripLogbook } from '../utils/content';
+// (unused imports removed)
+import { useHoverPagePreview } from '../hooks/useHoverPagePreview';
 
 export interface HierarchyListProps {
   items: Box[];
@@ -56,93 +56,15 @@ const buildTree = (items: Box[], displayTitle: (name: string) => string, basePre
 
 const HierarchyList: React.FC<HierarchyListProps> = ({ items, displayTitle, onOpenPage, basePrefix, truncateAt = 24, enableHoverPreview, currentGraph, pagesDirHandle, journalsDirHandle }) => {
   const nodes = buildTree(items, displayTitle, basePrefix);
-  const enableHover = !!enableHoverPreview;
   const folderMode = (currentGraph || '').startsWith('fs_');
-
-  // Popover states (moved to component scope)
-  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-  const [hoverName, setHoverName] = useState<string>('');
-  const [open, setOpen] = useState<boolean>(false);
-  const hideTimer = useRef<number | null>(null);
-  const overPopoverRef = useRef<boolean>(false);
-
-  const handleEnter = (e: React.MouseEvent<HTMLElement>, name: string) => {
-    if (!enableHover) return;
-    if (hideTimer.current) { window.clearTimeout(hideTimer.current); hideTimer.current = null; }
-    // 別リンクに移動したらプレビューをリセット（中身は必要に応じて再ロード）
-    if (hoverName !== name) {
-      setHoverName(name);
-      setPreviewBlocks(null);
-      loadedForNameRef.current = '';
-    }
-    if (!open) setOpen(true);
-    if (anchorEl !== e.currentTarget) setAnchorEl(e.currentTarget);
-  };
-  const delayedClose = () => {
-    if (!enableHover) return;
-    if (hideTimer.current) window.clearTimeout(hideTimer.current);
-    hideTimer.current = window.setTimeout(() => {
-      if (!overPopoverRef.current) { setOpen(false); setAnchorEl(null); }
-    }, 1000) as unknown as number;
-  };
-
-  // Preview cache (kept while hovering the same link)
-  const [previewBlocks, setPreviewBlocks] = useState<BlockNode[] | null>(null);
-  const [previewLoading, setPreviewLoading] = useState<boolean>(false);
-  const loadedForNameRef = useRef<string>('');
-  const previewLoadingRef = useRef<boolean>(false);
-
-  const parseBlocksFromText = (text: string): BlockNode[] => {
-    if (!text) return [];
-    text = text.replace(/^---[\s\S]*?---\s*/m, ''); // front-matter
-    text = stripLogbook(text); // hide LOGBOOK
-    const lines = text.split(/\r?\n/);
-    type T = { indent: number; content: string; children: T[] };
-    const root: T = { indent: -1, content: '', children: [] };
-    const stack: T[] = [root];
-    const indentOf = (s: string) => (s.match(/^\s*/)?.[0].length || 0);
-    const asContent = (s: string) => s.replace(/^\s*([-*+]\s+|\d+\.\s+)?/, '');
-    for (const raw of lines) {
-      const line = raw.replace(/\r/g, '');
-      if (!line.trim()) continue;
-      const indent = indentOf(line);
-      const node: T = { indent, content: asContent(line), children: [] };
-      while (stack.length && stack[stack.length-1].indent >= indent) stack.pop();
-      (stack[stack.length-1].children as T[]).push(node);
-      stack.push(node);
-    }
-    const toBlock = (n: T): BlockNode => ({ content: n.content, children: n.children.map(toBlock) });
-    return root.children.map(toBlock);
-  };
-
-  const loadPreviewIfNeeded = async (name: string) => {
-    if (loadedForNameRef.current === name && (previewBlocks && previewBlocks.length >= 0)) return;
-    if (previewLoadingRef.current) return;
-    setPreviewLoading(true);
-    previewLoadingRef.current = true;
-    try {
-      let file: File | null = null;
-      if (pagesDirHandle) {
-        const vname = [name, name.replace(/\//g,'___')];
-        for (const base of vname) {
-          const fh = await pagesDirHandle.getFileHandle(base + '.md').catch(()=>null) || await pagesDirHandle.getFileHandle(base + '.org').catch(()=>null);
-          if (fh) { file = await fh.getFile(); break; }
-        }
-      }
-      if (!file && journalsDirHandle) {
-        const vname = [name, name.replace(/\//g,'___')];
-        for (const base of vname) {
-          const fh = await journalsDirHandle.getFileHandle(base + '.md').catch(()=>null) || await journalsDirHandle.getFileHandle(base + '.org').catch(()=>null);
-          if (fh) { file = await fh.getFile(); break; }
-        }
-      }
-      let text = '';
-      if (file) text = await file.text();
-      const blocksParsed: BlockNode[] = parseBlocksFromText(text);
-      loadedForNameRef.current = name;
-      setPreviewBlocks(blocksParsed);
-    } finally { setPreviewLoading(false); previewLoadingRef.current = false; }
-  };
+  const enableHover = !!enableHoverPreview && folderMode;
+  // Reusable hover preview hook (1.5s hover to open, keep visible min 2s)
+  const { getHoverZoneProps, open, anchorEl, hoverName, previewBlocks, previewLoading, popoverProps } = useHoverPagePreview({
+    enable: enableHover,
+    folderMode,
+    pagesDirHandle,
+    journalsDirHandle,
+  });
 
   // Pure recursive renderer
   const renderTree = (nodesIn: TreeNode[], level = 0): React.ReactNode => {
@@ -165,13 +87,12 @@ const HierarchyList: React.FC<HierarchyListProps> = ({ items, displayTitle, onOp
                     return (
                       <span
                         className='bul-hover-zone'
-                        onMouseEnter={(e)=> { handleEnter(e, n.fullName!); void loadPreviewIfNeeded(n.fullName!); }}
-                        onMouseLeave={delayedClose}
+                        {...getHoverZoneProps(n.fullName!)}
                         style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}
                       >
                         <a
                           href='#'
-                          onClick={(e)=>{ e.preventDefault(); onOpenPage(n.fullName!); }}
+                          onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); onOpenPage(n.fullName!); }}
                           className={'bul-link' + (tail.truncated ? ' truncated' : '')}
                           title={lbl}
                         >
@@ -185,13 +106,12 @@ const HierarchyList: React.FC<HierarchyListProps> = ({ items, displayTitle, onOp
                   return (
                     <span
                       className='bul-hover-zone'
-                      onMouseEnter={(e)=> { handleEnter(e, n.fullName!); void loadPreviewIfNeeded(n.fullName!); }}
-                      onMouseLeave={delayedClose}
+                      {...getHoverZoneProps(n.fullName!)}
                       style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}
                     >
                       <a
                         href='#'
-                        onClick={(e)=>{ e.preventDefault(); onOpenPage(n.fullName!); }}
+                        onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); onOpenPage(n.fullName!); }}
                         className={'bul-link' + (t.truncated ? ' truncated' : '')}
                         title={lbl}
                       >{t.text}</a>
@@ -216,17 +136,22 @@ const HierarchyList: React.FC<HierarchyListProps> = ({ items, displayTitle, onOp
         <Popover
           open={open}
           anchorEl={anchorEl}
-      onClose={() => { setOpen(false); /* keep cache; clear only when hovering a different link */ }}
+          onClose={popoverProps.onClose}
           anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
           transformOrigin={{ vertical: 'top', horizontal: 'left' }}
           disableRestoreFocus
-      keepMounted
+          keepMounted
           slotProps={{ paper: { style: { pointerEvents: 'auto' } } as any }}
         >
           {hoverName ? (
-            <div style={{ maxWidth: 600, maxHeight: 600, overflow: 'auto', padding: 8 }}
-        onMouseEnter={() => { overPopoverRef.current = true; if (hideTimer.current) { window.clearTimeout(hideTimer.current); hideTimer.current = null; } }}
-        onMouseLeave={() => { overPopoverRef.current = false; delayedClose(); }}
+            <div
+              style={{ maxWidth: 600, maxHeight: 600, overflow: 'auto', padding: 8 }}
+              onMouseEnter={popoverProps.onMouseEnter}
+              onMouseLeave={popoverProps.onMouseLeave}
+              onMouseOver={popoverProps.onMouseOver}
+              onClickCapture={(e) => e.stopPropagation()}
+              onMouseDownCapture={(e) => e.stopPropagation()}
+              onPointerDownCapture={(e) => e.stopPropagation()}
             >
               {previewLoading ? (
                 <div style={{ width: '100%', height: '100%', display:'flex', alignItems:'center', justifyContent:'center' }}><CircularProgress size={20} /></div>
@@ -250,6 +175,9 @@ const HierarchyList: React.FC<HierarchyListProps> = ({ items, displayTitle, onOp
                     removeStrings={[]}
                     normalizeTasks={false}
                     highlightTerms={[]}
+                    enableHoverPreview={true}
+                    pagesDirHandle={pagesDirHandle}
+                    journalsDirHandle={journalsDirHandle}
                   />
                 ) : (
                   <div style={{ padding:'8px 12px', color:'#64748b', fontSize:12 }}>(no content)</div>
