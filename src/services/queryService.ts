@@ -1,4 +1,5 @@
 import { logger } from '../logger';
+import { datascriptQuery, getAllPages as lsGetAllPages, getPageBlocksTree as lsGetPageBlocksTree, getPage as lsGetPage } from './logseqApi';
 
 export type PageTuple = [string, string, number | undefined, boolean | undefined];
 
@@ -9,7 +10,7 @@ export type PageTuple = [string, string, number | undefined, boolean | undefined
 export async function queryPagesBasic(): Promise<PageTuple[]> {
   // Datascript での軽量クエリ
   try {
-    const q: any[] = await logseq.DB.datascriptQuery(`
+    const q: any[] | null = await datascriptQuery(`
       [:find (pull ?p [:block/uuid :block/original-name :block/title :block/updated-at :block/journal?])
        :where [?p :block/uuid ?u]]`);
     const tuples = (Array.isArray(q) ? q : []).map(row => {
@@ -25,7 +26,7 @@ export async function queryPagesBasic(): Promise<PageTuple[]> {
     logger.warn('datascriptQuery failed, falling back to getAllPages()', e);
   }
   // フォールバック: Editor.getAllPages
-  const pages = await logseq.Editor.getAllPages();
+  const pages = await lsGetAllPages();
   if (!pages) return [];
   return pages.map((p: any) => [p.originalName || p.title, p.uuid, p.updatedAt, p['journal?']] as PageTuple);
 }
@@ -37,16 +38,16 @@ export async function queryPagesBasic(): Promise<PageTuple[]> {
 export async function getPageBlocksTreeSafe(uuidOrName: string): Promise<any[] | null> {
   try {
     // 1st try: as-is (uuid or nameどちらでも試す)
-    let blocks = await logseq.Editor.getPageBlocksTree(uuidOrName);
+    let blocks = await lsGetPageBlocksTree(uuidOrName);
     if (Array.isArray(blocks) && blocks.length > 0) return blocks;
     // UUIDらしければ originalName を解決して再試行
     const looksUuid = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(uuidOrName);
     if (looksUuid) {
       try {
-        const page = await logseq.Editor.getPage(uuidOrName);
+        const page = await lsGetPage(uuidOrName);
         const name = (page as any)?.originalName || (page as any)?.name || '';
         if (name) {
-          blocks = await logseq.Editor.getPageBlocksTree(name);
+          blocks = await lsGetPageBlocksTree(name);
           if (Array.isArray(blocks) && blocks.length >= 0) return blocks || [];
         }
       } catch {/* ignore */}
@@ -61,12 +62,12 @@ export async function getPageBlocksTreeSafe(uuidOrName: string): Promise<any[] |
       ].filter(s => !!s)));
       for (const cand of candidates) {
         try {
-          blocks = await logseq.Editor.getPageBlocksTree(cand);
+          blocks = await lsGetPageBlocksTree(cand);
           if (Array.isArray(blocks)) return blocks;
         } catch {/* ignore */}
       }
     }
-    return Array.isArray(blocks) ? blocks : [];
+    return Array.isArray(blocks as any) ? (blocks as any) : [];
   } catch (err) {
     logger.debug('getPageBlocksTree failed for', uuidOrName, err);
     return null;

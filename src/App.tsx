@@ -239,10 +239,14 @@ function App() {
         })();
       }
     };
-    logseq.on('ui:visible:changed', handler);
-    return () => {
-      try { (logseq as any).off && (logseq as any).off('ui:visible:changed', handler); } catch { /* ignore */ }
-    };
+    let off: (() => void) | undefined;
+    (async () => {
+      try {
+        const { onUiVisibleChanged } = await import('./services/logseqApi');
+        off = onUiVisibleChanged(handler);
+      } catch {}
+    })();
+    return () => { try { off && off(); } catch { /* ignore */ } };
   }, []);
 
   // Logseq同期は不要（フォルダ専用）
@@ -712,7 +716,7 @@ function App() {
       try { assetsHandle = await handle.getDirectoryHandle('assets'); } catch { assetsHandle = null; }
       if (!pagesHandle) {
         // pages も journals も見つからない
-        logseq.UI.showMsg(t('please-select-pages'));
+  import('./services/logseqApi').then(({ uiShowMsg }) => uiShowMsg(t('please-select-pages') as string)).catch(() => {});
         pickingRef.current = false; setLoading(false); return;
       }
     }
@@ -1115,7 +1119,8 @@ function App() {
     } catch {/* ignore */}
     if (!currentGraph.startsWith('fs_')) {
       try {
-        const page = await logseq.Editor.getPage(name).catch(() => null);
+        const { getPage } = await import('./services/logseqApi');
+        const page = await getPage(name).catch(() => null as any);
         const box: Box = { graph: currentGraph, name: page?.originalName || name, uuid: page?.uuid || '', time: Date.now(), summary: [], image: '' } as Box;
         void openInSidebar(box);
       } catch {/* ignore */}
@@ -1228,7 +1233,7 @@ function App() {
             <span className='g-mode-badge' style={{ background: '#2d6', color: '#fff', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600 }} title={t('mode-choose-folder-btn') as string}>FOLDER</span>
           </div>
           {/* Exclude journals トグルは廃止 */}
-          <Clear className='clear-btn' onClick={() => logseq.hideMainUI({ restoreEditingCursor: true })} style={{ cursor: 'pointer', float: 'right', marginTop: 10, marginRight: 24 }} />
+          <Clear className='clear-btn' onClick={() => { import('./services/logseqApi').then(({ hideMainUI }) => hideMainUI({ restoreEditingCursor: true })).catch(() => {}); }} style={{ cursor: 'pointer', float: 'right', marginTop: 10, marginRight: 24 }} />
         </div>
   </div>
   )}

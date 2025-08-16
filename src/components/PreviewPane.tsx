@@ -142,11 +142,14 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
   const [settingsHover, setSettingsHover] = useState(false);
   // Underline markers toggle: plugin settings に移行（UI は削除）。
   React.useEffect(() => {
-    try {
-      const v = (logseq as any).settings?.underlineMarkersEnabled;
-      const cls = 'gs-underline-off';
-      if (v === false) document.body.classList.add(cls); else document.body.classList.remove(cls);
-    } catch {}
+    (async () => {
+      try {
+        const { isLogseqAvailable } = await import('../services/logseqApi');
+        const v = isLogseqAvailable() ? (window as any).logseq?.settings?.underlineMarkersEnabled : undefined;
+        const cls = 'gs-underline-off';
+        if (v === false) document.body.classList.add(cls); else document.body.classList.remove(cls);
+      } catch {}
+    })();
   });
 
   // Hover preview for breadcrumb links (folder mode only)
@@ -337,12 +340,10 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
                 if (text == null) return;
                 if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
                 else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
-                const lg = (window as any).logseq;
-                if (lg && lg.UI && typeof lg.UI.showMsg === 'function') lg.UI.showMsg(t('copied'));
+                try { const { uiShowMsg } = await import('../services/logseqApi'); uiShowMsg(t('copied') as string); } catch {}
               } catch (e) {
                 console.error(e);
-                const lg = (window as any).logseq;
-                if (lg && lg.UI && typeof lg.UI.showMsg === 'function') lg.UI.showMsg(t('copy-failed'));
+                try { const { uiShowMsg } = await import('../services/logseqApi'); uiShowMsg(t('copy-failed') as string); } catch {}
               }
             }}>{t('copy-content')}</Button> ); })()}
           </div>

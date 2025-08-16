@@ -349,7 +349,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
     const InlineRef: React.FC<{ uuid: string; k: string }> = ({ uuid, k }) => {
       const [preview, setPreview] = useState<string>('');
       useEffect(() => {
-        let mounted = true; (async () => { if (folderMode) return; try { if ((window as any).__graphSieveDetachedMode) return; const blk = await logseq.Editor.getBlock(uuid); if (blk && mounted) setPreview((blk.content || '').split('\n')[0] || ''); } catch {} })();
+        let mounted = true; (async () => { if (folderMode) return; try { const { getBlock, isLogseqAvailable } = await import('../services/logseqApi'); if (!isLogseqAvailable()) return; const blk = await getBlock(uuid); if (blk && mounted) setPreview((blk.content || '').split('\n')[0] || ''); } catch {} })();
         return () => { mounted = false; };
       }, [uuid]);
       if (folderMode) return <span key={k} className='ls-inline-ref ref removed'></span>;
@@ -372,7 +372,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
     const InlineEmbedBlock: React.FC<{ uuid: string; k: string }> = ({ uuid, k }) => {
       const [preview, setPreview] = useState<string>('');
       useEffect(() => {
-        let mounted = true; (async () => { if (folderMode) return; try { if ((window as any).__graphSieveDetachedMode) return; const blk = await logseq.Editor.getBlock(uuid); if (blk && mounted) setPreview((blk.content || '').split('\n')[0] || ''); } catch {} })();
+        let mounted = true; (async () => { if (folderMode) return; try { const { getBlock, isLogseqAvailable } = await import('../services/logseqApi'); if (!isLogseqAvailable()) return; const blk = await getBlock(uuid); if (blk && mounted) setPreview((blk.content || '').split('\n')[0] || ''); } catch {} })();
         return () => { mounted = false; };
       }, [uuid]);
       if (folderMode) return <span key={k} className='ls-inline-embed embed removed'></span>;
@@ -428,7 +428,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
     const uuidMatch = line.match(/[0-9a-fA-F-]{36}/);
     const [preview, setPreview] = useState<string>('');
     useEffect(() => {
-      let mounted = true; (async () => { if (folderMode) return; if (uuidMatch) { try { if ((window as any).__graphSieveDetachedMode) return; const blk = await logseq.Editor.getBlock(uuidMatch[0]); if (blk && mounted) setPreview((blk.content || '').split('\n')[0] || ''); } catch {} } else { const pageMatch = line.match(/\[\[([^\]]+)\]\]/); if (pageMatch && mounted) setPreview(pageMatch[1]); } })();
+      let mounted = true; (async () => { if (folderMode) return; if (uuidMatch) { try { const { getBlock, isLogseqAvailable } = await import('../services/logseqApi'); if (!isLogseqAvailable()) return; const blk = await getBlock(uuidMatch[0]); if (blk && mounted) setPreview((blk.content || '').split('\n')[0] || ''); } catch {} } else { const pageMatch = line.match(/\[\[([^\]]+)\]\]/); if (pageMatch && mounted) setPreview(pageMatch[1]); } })();
       return () => { mounted = false; };
     }, []);
     if (folderMode) return <></>;

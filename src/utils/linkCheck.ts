@@ -1,5 +1,6 @@
 // file resolution is delegated to pageLocator
 import { locatePageFile } from './pageLocator';
+import { getPageBlocksTree as lsGetPageBlocksTree, isLogseqAvailable } from '../services/logseqApi';
 
 type Listener = (graph: string | undefined, name: string, value: boolean) => void;
 
@@ -53,11 +54,10 @@ export const ensureHasContentChecked = async (
   if (cache.has(k) || pending.has(k)) return;
   pending.add(k);
   try {
-    if (env.mode === 'api') {
+  if (env.mode === 'api') {
       try {
-        const detached = (window as any).__graphSieveDetachedMode;
-        if (detached) return; // skip in detached browser
-        const tree: any[] | null = await (logseq as any).Editor.getPageBlocksTree(name).catch(() => null);
+    if (!isLogseqAvailable()) return; // skip when Logseq is not available
+    const tree: any[] | null = await lsGetPageBlocksTree(name).catch(() => null as any);
         let has = false;
         const walk = (arr: any[]) => {
           for (const b of arr) {
