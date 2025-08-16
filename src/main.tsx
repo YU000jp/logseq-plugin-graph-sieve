@@ -47,6 +47,17 @@ const syncI18nWithLogseq = async () => {
 };
 
 async function main() {
+	// Plugin settings schema
+	logseq.useSettingsSchema([
+		{
+			key: 'underlineMarkersEnabled',
+			type: 'boolean',
+			title: 'Underline markers',
+			description: 'リンクの本文有無インジケータ（下線）を表示する',
+			default: true,
+		},
+	]);
+
 	// Ctrl+Shift+Enter or Command+Shift+Enter
 	/*
   logseq.App.registerCommandShortcut(
@@ -109,6 +120,17 @@ async function main() {
 			<App />
 		</React.StrictMode>
 	);
+
+	// Reflect settings on load
+	try {
+		const applyUnderline = () => {
+			const v = (logseq as any).settings?.underlineMarkersEnabled;
+			const cls = 'gs-underline-off';
+			if (v === false) document.body.classList.add(cls); else document.body.classList.remove(cls);
+		};
+		applyUnderline();
+		logseq.onSettingsChanged?.(applyUnderline);
+	} catch {}
 }
 
 // bootstrap

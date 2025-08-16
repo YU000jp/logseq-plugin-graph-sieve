@@ -139,16 +139,14 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
   const removeMacroTokens = (text: string, enable: boolean, alsoQueries: boolean) => removeMacroTokensUtil(text, enable, alsoQueries);
   const [copyHover, setCopyHover] = useState(false);
   const [settingsHover, setSettingsHover] = useState(false);
-  // Underline markers toggle (persisted)
-  const [underlineMarkersEnabled, setUnderlineMarkersEnabled] = useState<boolean>(() => {
-    const v = localStorage.getItem('underlineMarkersEnabled');
-    return v === null ? true : v === 'true';
-  });
+  // Underline markers toggle: plugin settings に移行（UI は削除）。
   React.useEffect(() => {
-    localStorage.setItem('underlineMarkersEnabled', String(underlineMarkersEnabled));
-    const cls = 'gs-underline-off';
-    if (!underlineMarkersEnabled) document.body.classList.add(cls); else document.body.classList.remove(cls);
-  }, [underlineMarkersEnabled]);
+    try {
+      const v = (logseq as any).settings?.underlineMarkersEnabled;
+      const cls = 'gs-underline-off';
+      if (v === false) document.body.classList.add(cls); else document.body.classList.remove(cls);
+    } catch {}
+  });
 
   // Hover preview for breadcrumb links (folder mode only)
   const { getHoverZoneProps, open, anchorEl, hoverName, previewBlocks, previewLoading, popoverProps } = useHoverPagePreview({
@@ -265,7 +263,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = (props) => {
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark'} control={<Switch size='small' checked={stripPageBrackets} onChange={(_, v) => setStripPageBrackets(v)} />} label={t('toggle-strip-page-brackets') || 'Strip [[ ]]'} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={!hidePageRefs} onChange={(_, v) => setHidePageRefs(!v)} />} label={t('toggle-page-links') || t('toggle-hide-page-refs') || 'Page links'} />
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={hideQueries} onChange={(_, v) => setHideQueries(v)} />} label={t('toggle-hide-queries') || 'Hide queries'} />
-          <FormControlLabel className='prop-filter' disabled={false} control={<Switch size='small' checked={underlineMarkersEnabled} onChange={(_, v) => setUnderlineMarkersEnabled(v)} />} label={'Underline markers'} />
+          {/* Underline markers はプラグイン設定に移動 */}
         </div>
         <div className='sidebar-row sidebar-row--filters small-text'>
           <FormControlLabel className='prop-filter' disabled={sidebarTab === 'nomark' || sidebarTab === 'outline'} control={<Switch size='small' checked={hideRenderers} onChange={(_, v) => setHideRenderers(v)} />} label={t('toggle-hide-renderers') || 'Hide renderers'} />

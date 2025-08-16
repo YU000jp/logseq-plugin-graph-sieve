@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, CircularProgress } from '@mui/material';
 import { useHoverPagePreview } from '../hooks/useHoverPagePreview';
+import { ensureHasContentChecked, getCachedHasContent, subscribeLinkCheck } from '../utils/linkCheck';
 import { useTranslation } from 'react-i18next';
 import { sanitizePlain as sanitizePlainUtil, isForcedHiddenPropLine as isForcedHiddenPropLineUtil, isOnlyRef as isOnlyRefUtil, isOnlyEmbed as isOnlyEmbedUtil, stripLogbook as stripLogbookUtil } from '../utils/content';
 import type { BlockNode } from '../utils/blockText';
@@ -43,9 +44,12 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
   const sanitize = (s?: string) => sanitizePlainUtil(s, { removeStrings, hideProperties, alwaysHideKeys });
   const [assetUrls, setAssetUrls] = useState<Record<string,string>>({});
   const pendingRef = useRef<Set<string>>(new Set());
-  // ページ本文有無チェック用
-  const [pageHasContent, setPageHasContent] = useState<Record<string, boolean>>({});
-  const pendingPageRef = useRef<Set<string>>(new Set());
+  // ページ本文有無（非同期キャッシュの反映用）
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const unsub = subscribeLinkCheck((_graph, _name, _val) => { forceTick(v => v + 1); });
+    return unsub;
+  }, []);
 
   // === Hover preview via reusable hook ===
   const { getHoverZoneProps, open, anchorEl, hoverName, previewBlocks, previewLoading, popoverProps } = useHoverPagePreview({
@@ -59,63 +63,32 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
     cacheTTLms: Number(localStorage.getItem('hoverCacheTTLms') || '120000') || 120000,
   });
 
-  // 指定ページに本文（レンダ可能テキスト）があるかを簡易判定
-  const ensurePageHasContent = useCallback((name: string) => {
-    if (!name) return;
-    if (folderMode) return; // フォルダモードでは未サポート
-    if (pageHasContent[name] !== undefined) return;
-    if (pendingPageRef.current.has(name)) return;
-    pendingPageRef.current.add(name);
-    (async () => {
-      try {
-        // Detached モードでは API を呼ばない
-        if ((window as any).__graphSieveDetachedMode) return;
-        // getPageBlocksTree でブロック配列を取得し、本文行があるか軽くチェック
-        const tree: any[] | null = await (logseq as any).Editor.getPageBlocksTree(name).catch(() => null);
-        let has = false;
-        const inspect = (arr: any[]) => {
-          for (const b of arr) {
-            const content = (b?.content || '').toString();
-            // プロパティ行や空白のみを除外
-            const lines = content.split('\n');
-            for (const L of lines) {
-              const l = (L || '').replace(/\r/g, '');
-              if (isForcedHiddenPropLineUtil(l, alwaysHideKeys)) continue;
-              if (hideProperties && l.includes(':: ')) continue;
-              if (/^\s*$/.test(l)) continue;
-              // 純粋な参照/埋め込みのみは除外
-              const onlyRef = /^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*\(\([0-9a-fA-F-]{36}\)\)\s*$/.test(l);
-              const onlyEmbed = /^(?:\s*(?:[-*+]\s+|\d+\.\s+)?)?(?:\s*\[(?:x|X| )\]\s*)?\s*\{\{\s*embed\b[^}]*\}\}\s*$/i.test(l);
-              if (onlyRef || onlyEmbed) continue;
-              has = true; return;
-            }
-            if (has) return;
-            if (b.children && b.children.length) inspect(b.children);
-            if (has) return;
-          }
-        };
-        if (Array.isArray(tree)) inspect(tree);
-        setPageHasContent(prev => (prev[name] === undefined ? { ...prev, [name]: !!has } : prev));
-      } finally {
-        pendingPageRef.current.delete(name);
-      }
-    })();
-  }, [alwaysHideKeys, hideProperties, folderMode, pageHasContent]);
+  const triggerAsyncCheck = useCallback((pageName: string) => {
+    if (!pageName) return;
+    const env = folderMode ? {
+      mode: 'folder' as const,
+      pagesDirHandle,
+      journalsDirHandle,
+      hideProperties,
+      hideQueries,
+      hideRenderers,
+      alwaysHideKeys,
+    } : {
+      mode: 'api' as const,
+      hideProperties,
+      hideQueries,
+      hideRenderers,
+      alwaysHideKeys,
+    };
+    void ensureHasContentChecked(currentGraph, pageName, env);
+  }, [folderMode, pagesDirHandle, journalsDirHandle, hideProperties, hideQueries, hideRenderers, alwaysHideKeys, currentGraph]);
 
   // 内部ページリンク描画（共通処理）
   const renderInternalPageLink = useCallback((pageName: string, label: string, key: string) => {
     // 本文有無チェック（モード別）
-    let hasC: boolean | undefined = undefined;
-    if (folderMode) {
-      // フォルダモードでは hover 時に読み込んだ previewBlocks から判定
-      if (hoverName === pageName && !previewLoading) {
-        hasC = !!(previewBlocks && previewBlocks.length > 0);
-      }
-    } else {
-      // API による軽量チェック
-      ensurePageHasContent(pageName);
-      hasC = pageHasContent[pageName];
-    }
+  // 非同期キャッシュから取得（未判定ならトリガー）
+  let hasC: boolean | undefined = getCachedHasContent(currentGraph, pageName);
+  if (hasC === undefined) triggerAsyncCheck(pageName);
   return (
       <span key={key} className='ls-hover-zone'
         {...getHoverZoneProps(pageName)}
@@ -138,7 +111,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
         </a>
       </span>
     );
-  }, [ensurePageHasContent, getHoverZoneProps, onOpenPage, pageHasContent, folderMode, hoverName, previewLoading, previewBlocks]);
+  }, [triggerAsyncCheck, getHoverZoneProps, onOpenPage, currentGraph]);
 
   // 検索語ハイライト用の正規表現（大文字小文字無視）
   const highlightRe = useMemo(() => {
