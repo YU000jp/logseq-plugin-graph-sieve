@@ -64,7 +64,7 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
     cacheTTLms: Number(localStorage.getItem('hoverCacheTTLms') || '120000') || 120000,
   });
 
-  const triggerAsyncCheck = useCallback((pageName: string) => {
+  const triggerAsyncCheck = useCallback((pageName: string, element?: Element) => {
     if (!pageName) return;
     const env = folderMode ? {
       mode: 'folder' as const,
@@ -81,34 +81,40 @@ export const BlockList: React.FC<{ blocks: BlockNode[]; hideProperties?: boolean
       hideRenderers,
       alwaysHideKeys,
     };
-    void ensureHasContentChecked(currentGraph, pageName, env);
+    ensureHasContentChecked(currentGraph, pageName, env, element);
   }, [folderMode, pagesDirHandle, journalsDirHandle, hideProperties, hideQueries, hideRenderers, alwaysHideKeys, currentGraph]);
 
   // 内部ページリンク描画（共通処理）
   const renderInternalPageLink = useCallback((pageName: string, label: string, key: string) => {
     // 本文有無チェック（モード別）
-  // 非同期キャッシュから取得（未判定ならトリガー）
-  let hasC: boolean | undefined = getCachedHasContent(currentGraph, pageName);
-  if (hasC === undefined) triggerAsyncCheck(pageName);
-  return (
+    // 非同期キャッシュから取得（未判定ならトリガー）
+    let hasC: boolean | undefined = getCachedHasContent(currentGraph, pageName);
+    
+    return (
       <span key={key} className='ls-hover-zone'
         {...getHoverZoneProps(pageName)}
-        style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}>
+        style={{ display:'inline-block', padding:'3px 6px', margin:'-3px -6px', borderRadius:4 }}
+        ref={(el) => {
+          // 要素がマウントされたらリンクチェックを開始
+          if (el && hasC === undefined) {
+            triggerAsyncCheck(pageName, el);
+          }
+        }}>
         <a
           {...(onOpenPage ? getOpenPageLinkProps(pageName, onOpenPage) : { href: '#', tabIndex: 0 })}
           className='ls-page-ref'
-    title={pageName}
-    data-hascontent={hasC === undefined ? undefined : (hasC ? '1' : '0')}
-    // Note: data-hascontent-label is styled via CSS; i18n labels are provided in CSS for now.
-    data-hascontent-label={hasC === undefined ? undefined : (hasC ? t('has-content') : t('no-content'))}
-  aria-label={`${pageName}${hasC === undefined ? '' : hasC ? ' — ' + (t('has-content') as string) : ' — ' + (t('no-content') as string)}`}
-  aria-describedby={(open && hoverName === pageName) ? 'gs-hover-popover' : undefined}
-  >
+          title={pageName}
+          data-hascontent={hasC === undefined ? undefined : (hasC ? '1' : '0')}
+          // Note: data-hascontent-label is styled via CSS; i18n labels are provided in CSS for now.
+          data-hascontent-label={hasC === undefined ? undefined : (hasC ? t('has-content') : t('no-content'))}
+          aria-label={`${pageName}${hasC === undefined ? '' : hasC ? ' — ' + (t('has-content') as string) : ' — ' + (t('no-content') as string)}`}
+          aria-describedby={(open && hoverName === pageName) ? 'gs-hover-popover' : undefined}
+        >
           {label}
         </a>
       </span>
     );
-  }, [triggerAsyncCheck, getHoverZoneProps, onOpenPage, currentGraph]);
+  }, [triggerAsyncCheck, getHoverZoneProps, onOpenPage, currentGraph, t, open, hoverName]);
 
   // 検索語ハイライト用の正規表現（大文字小文字無視）
   const highlightRe = useMemo(() => {

@@ -5,6 +5,7 @@ import "./main.css";
 import "@logseq/libs";
 import i18n from "./i18n/configs";
 import { db } from './db';
+import { cleanupLinkCheck } from './utils/linkCheck';
 // import { SimpleCommandKeybinding } from '@logseq/libs/dist/LSPlugin'
 
 const openCardBox = () => {
@@ -160,3 +161,10 @@ logseq
 		logseq.provideModel({ openCardBox });
 	})
 	.catch(console.error);
+
+// プラグイン終了時のクリーンアップ
+if (typeof window !== 'undefined') {
+	window.addEventListener('beforeunload', () => {
+		cleanupLinkCheck();
+	});
+}
