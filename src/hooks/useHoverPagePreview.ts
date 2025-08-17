@@ -50,6 +50,7 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
   const previewLoadingRef = useRef<boolean>(false);
   const requestIdRef = useRef<number>(0);
   const hoverNameRef = useRef<string>('');
+  const pendingRequestsRef = useRef<Set<number>>(new Set());
   // Simple in-memory cache with TTL and max size
   const cacheRef = useRef<Map<string, { t: number; blocks: BlockNode[] }>>(new Map());
   const pruneCache = useCallback(() => {
@@ -87,12 +88,13 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
     requestIdRef.current += 1;
     const myRequestId = requestIdRef.current;
 
-    // mark loading
-    setPreviewLoading(true);
-    previewLoadingRef.current = true;
+  // mark loading and track pending request
+  pendingRequestsRef.current.add(myRequestId);
+  setPreviewLoading(true);
+  previewLoadingRef.current = true;
 
     try {
-      const located = await locatePageFile(name, pagesDirHandle, journalsDirHandle, { scanFallback: true });
+  const located = await locatePageFile(name, pagesDirHandle, journalsDirHandle, { scanFallback: true });
       // if a newer request started, abandon this result
       if (myRequestId !== requestIdRef.current) {
         console.debug(`[hoverPreview] Stale locate result for ${name}, ignoring`);
@@ -127,8 +129,10 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
     } catch (e) {
       console.debug('[hoverPreview] loadPreviewIfNeeded error', e);
     } finally {
-      // if this is the latest request, clear loading state
-      if (myRequestId === requestIdRef.current) {
+      // remove pending marker for this request
+      try { pendingRequestsRef.current.delete(myRequestId); } catch {}
+      // If no more pending requests, clear loading state
+      if (pendingRequestsRef.current.size === 0) {
         setPreviewLoading(false);
         previewLoadingRef.current = false;
       }
