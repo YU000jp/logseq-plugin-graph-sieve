@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import type { BlockNode } from '../utils/blockText';
 import { locatePageFile } from '../utils/pageLocator';
 import { parseBlocksFromText } from '../utils/parseBlocks';
@@ -48,6 +48,8 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
   const minVisibleUntilRef = useRef<number>(0);
   const loadedForNameRef = useRef<string>('');
   const previewLoadingRef = useRef<boolean>(false);
+  const requestIdRef = useRef<number>(0);
+  const hoverNameRef = useRef<string>('');
   // Simple in-memory cache with TTL and max size
   const cacheRef = useRef<Map<string, { t: number; blocks: BlockNode[] }>>(new Map());
   const pruneCache = useCallback(() => {
@@ -77,21 +79,60 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
       setPreviewBlocks(cached.blocks);
       return;
     }
+
+    // If already loaded for this name, do nothing
     if (loadedForNameRef.current === name && (previewBlocks && previewBlocks.length >= 0)) return;
-    if (previewLoadingRef.current) return;
+
+    // If another load is in progress, we still allow this to start but mark it as the latest
+    requestIdRef.current += 1;
+    const myRequestId = requestIdRef.current;
+
+    // mark loading
     setPreviewLoading(true);
     previewLoadingRef.current = true;
+
     try {
       const located = await locatePageFile(name, pagesDirHandle, journalsDirHandle, { scanFallback: true });
+      // if a newer request started, abandon this result
+      if (myRequestId !== requestIdRef.current) {
+        console.debug(`[hoverPreview] Stale locate result for ${name}, ignoring`);
+        return;
+      }
       const file: File | null = located?.file || null;
       let text = '';
-      if (file) text = await file.text();
+      if (file) {
+        text = await file.text();
+        if (myRequestId !== requestIdRef.current) {
+          console.debug(`[hoverPreview] Stale file read for ${name}, ignoring`);
+          return;
+        }
+      }
       const blocksParsed: BlockNode[] = parseBlocksFromText(text);
-      loadedForNameRef.current = name;
-      setPreviewBlocks(blocksParsed);
-      cacheRef.current.set(name, { t: Date.now(), blocks: blocksParsed });
-      pruneCache();
-    } finally { setPreviewLoading(false); previewLoadingRef.current = false; }
+
+      // If hoverName changed while we were loading, prefer the newer hover and ignore
+      if (hoverNameRef.current && hoverNameRef.current !== name) {
+        console.debug(`[hoverPreview] Hover moved to ${hoverNameRef.current}, ignoring loaded preview for ${name}`);
+        return;
+      }
+
+      // Ensure this is still the latest request before applying
+      if (myRequestId === requestIdRef.current) {
+        loadedForNameRef.current = name;
+        setPreviewBlocks(blocksParsed);
+        cacheRef.current.set(name, { t: Date.now(), blocks: blocksParsed });
+        pruneCache();
+      } else {
+        console.debug(`[hoverPreview] Request id mismatch for ${name}, not applying`);
+      }
+    } catch (e) {
+      console.debug('[hoverPreview] loadPreviewIfNeeded error', e);
+    } finally {
+      // if this is the latest request, clear loading state
+      if (myRequestId === requestIdRef.current) {
+        setPreviewLoading(false);
+        previewLoadingRef.current = false;
+      }
+    }
   }, [enable, folderMode, pagesDirHandle, journalsDirHandle, parseBlocksFromText, previewBlocks, pruneCache]);
 
   const startShowTimer = useCallback((target: HTMLElement, name: string) => {
@@ -103,6 +144,8 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
       setPreviewBlocks(null);
       loadedForNameRef.current = '';
     }
+    // keep hoverNameRef in sync for cancellation checks
+    hoverNameRef.current = name;
     setAnchorEl(target);
     overZoneRef.current = true;
     void loadPreviewIfNeeded(name);
@@ -111,6 +154,10 @@ export function useHoverPagePreview(opts: HoverPreviewOptions): HoverPreviewApi 
       minVisibleUntilRef.current = Date.now() + minVisibleMs;
     }, showDelayMs) as unknown as number;
   }, [enable, hoverName, loadPreviewIfNeeded, minVisibleMs, showDelayMs]);
+
+  // keep hoverNameRef updated when hoverName state changes from other places
+  // so that background loads can detect latest hover target
+  useEffect(() => { hoverNameRef.current = hoverName; }, [hoverName]);
 
   const maybeClose = useCallback(() => {
     if (!enable) return;
