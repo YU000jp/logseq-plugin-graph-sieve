@@ -49,7 +49,7 @@
     "typescript": "^5.9.2",
     "vite": "^7.1.5",
     "vite-plugin-logseq": "^1.1.2",
-    "vitest": "^1.6.1"
+    "vitest": "^3.2.4"
   },
   "logseq": {
     "id": "logseq-graph-sieve-250811",
